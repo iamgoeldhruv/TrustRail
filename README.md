@@ -1,32 +1,38 @@
 # TrustRail
 
-An authorization and transaction-control layer that lets AI agents act on real systems while keeping every action policy-checked, human-approved, auditable and recoverable.
+An authorization and transaction-control layer that lets AI agents act
+on real systems while keeping every action policy-checked,
+human-approved, auditable and recoverable.
 
 ## Tech Stack
 
-- Python 3.12+
-- FastAPI
-- Pydantic
-- Pydantic Settings
-- SQLite (planned)
-- Pytest
-- Ruff
-- MyPy
+-   Python 3.12+
+-   FastAPI
+-   Pydantic
+-   Pydantic Settings
+-   SQLite (planned)
+-   MCP Python SDK
+-   HTTPX
+-   Pytest
+-   Ruff
+-   MyPy
 
 ## Current Progress
 
 ### Project Setup & Scaffolding
 
-- [x] Initialized Python virtual environment.
-- [x] Created project dependency configuration (`pyproject.toml`).
-- [x] Installed project dependencies.
-- [x] Created backend directory structure.
-- [x] Initialized FastAPI application.
-- [x] Implemented basic `/health` endpoint.
-- [x] Created `Makefile` for common development commands.
-- [x] Created `.env.example` for environment configuration.
-- [x] Created `.gitignore` for excluding secrets and generated files.
-- [x] Added centralized application configuration using Pydantic Settings.
+-   [x] Initialized Python virtual environment.
+-   [x] Created project dependency configuration (`pyproject.toml`).
+-   [x] Installed project dependencies.
+-   [x] Created backend directory structure.
+-   [x] Initialized FastAPI application.
+-   [x] Implemented basic `/health` endpoint.
+-   [x] Created `Makefile` for common development commands.
+-   [x] Created `.env.example` for environment configuration.
+-   [x] Created `.gitignore` for excluding secrets and generated files.
+-   [x] Added centralized application configuration using Pydantic
+    Settings.
+
 ### Otari Integration & CLI
 
 - [x] Implemented asynchronous Otari chat-completions client using HTTPX.
@@ -34,24 +40,42 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Implemented HTTP client lifecycle management.
 - [x] Created `trustrail ping` CLI command.
 - [x] Verified successful inference through the hosted Otari gateway.
+- [x] Implemented asynchronous Otari MCP discovery client using HTTPX.
+- [x] Added Pydantic models for MCP discovery responses and discovered tools.
+- [x] Added error handling for MCP discovery HTTP and connection failures.
+- [x] Created a script to verify MCP tool discovery through the actual Otari API.
+- [x] Added mocked unit tests for MCP discovery and `server_revision` validation.
+
+### MCP Server Spike
+
+- [x] Implemented a Python MCP server using Streamable HTTP.
+- [x] Added `get_status` (read) and `update_status` (write) tools.
+- [x] Verified tool discovery and execution using MCP Inspector.
+- [x] Deployed the MCP server publicly over HTTPS on Railway.
+- [x] Registered the MCP server in Otari with an explicit tool allowlist.
+- [x] Integrated Otari MCP tool discovery using `GET /api/v1/mcp/servers/{server_id}/tools`.
+- [x] Verified discovery of allowlisted tools and captured the returned `server_revision`.
+
+
 
 ## Running Locally
 
-```bash
+``` bash
 source .venv/bin/activate
 make run
+```
 
 ## Directory Structure
+
+``` text
 TrustRail/
 │
 ├── app/
 │   ├── __init__.py
 │   ├── main.py
-│   │
 │   ├── core/
 │   │   ├── __init__.py
 │   │   └── config.py
-│   │
 │   ├── cli/
 │   │   ├── __init__.py
 │   │   ├── main.py
@@ -61,8 +85,8 @@ TrustRail/
 │   ├── otari/
 │   │   ├── __init__.py
 │   │   ├── client.py
-│   │   └── exceptions.py
-│   │
+│   │   ├── exceptions.py
+│   │   └── mcp.py
 │   ├── policy/
 │   ├── authz/
 │   ├── facts/
@@ -75,11 +99,20 @@ TrustRail/
 │   └── fakeotari/
 │
 ├── mcp_github/
+├── mcp_spike/
+│   ├── __init__.py
+│   └── server.py
+│
 ├── tests/
 │   └── otari/
-├── scripts/
-├── docs/
+│       └── test_mcp.py
 │
+├── scripts/
+│   └── discover_otari_mcp.py
+│
+├── docs/
+├── Dockerfile
+├── requirements.txt
 ├── pyproject.toml
 ├── Makefile
 ├── .env.example
