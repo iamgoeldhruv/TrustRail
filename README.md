@@ -65,6 +65,12 @@ human-approved, auditable and recoverable.
 - [x] Added semantic validation for contradictory policies.
 - [x] Added policy parsing and validation tests.
 
+### Authorization Models
+
+- [x] Defined typed Fact models for GitHub issue attributes.
+- [x] Added Action model for representing agent-proposed operations.
+- [x] Added Decision model with authorization outcomes and reason codes.
+
 ## Running Locally
 
 ``` bash
@@ -100,6 +106,8 @@ TrustRail/
 │   │   ├── parser.py
 │   │   └── validator.py
 │   ├── authz/
+│   │   ├── __init__.py
+│   │   └── models.py
 │   ├── facts/
 │   ├── txn/
 │   ├── approvals/
