@@ -45,7 +45,8 @@ human-approved, auditable and recoverable.
 - [x] Added error handling for MCP discovery and execution failures.
 - [x] Created scripts to verify MCP discovery and tool execution through the actual Otari API.
 - [x] Verified successful read-only `get_status` execution through Otari using a workspace API key.
-
+- [x] Verified MCP server configuration change detection using `server_revision`.
+- [x] Verified stale revision rejection with HTTP 409 (`mcp_server_changed`).
 ### MCP Server Spike
 
 - [x] Implemented a Python MCP server using Streamable HTTP.

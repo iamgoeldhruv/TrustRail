@@ -23,16 +23,13 @@ async def run() -> None:
     ]
 
     if missing:
-        sys.exit(
-            f"Missing environment variables: {', '.join(missing)}"
-        )
+        sys.exit(f"Missing environment variables: {', '.join(missing)}")
 
     async with OtariMCPClient(
         base_url=base_url,
         api_key=api_key,
         timeout=45.0,
     ) as client:
-
         try:
             # Step 1: Discover the server and its current revision.
             discovery = await client.discover(server_id)
@@ -42,11 +39,9 @@ async def run() -> None:
             print(f"Server revision: {discovery.server_revision}")
 
             # Step 2: Verify that the requested tool is available.
-            tool_name = "get_status"
+            tool_name = "update_status"
 
-            available_tools = {
-                tool.name for tool in discovery.tools
-            }
+            available_tools = {tool.name for tool in discovery.tools}
 
             if tool_name not in available_tools:
                 raise RuntimeError(
@@ -65,9 +60,9 @@ async def run() -> None:
             result = await client.execute(
                 server_id=discovery.server_id,
                 tool_name=tool_name,
-                arguments={},
+                arguments={"message": "TrustRail fault injection experiment"},
                 server_revision=discovery.server_revision,
-                client_execution_id=execution_id,
+                client_execution_id=uuid4(),
             )
 
             # Step 5: Display the native MCP result.
