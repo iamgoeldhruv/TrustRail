@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     otari_api_key: str
     # otari_mcp_server_id: str
     otari_timeout: float = 60.0
+    otari_mcp_server_id: str | None = None
 
     # # AI model configuration
     tr_planner_model: str
