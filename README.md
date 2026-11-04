@@ -57,6 +57,13 @@ human-approved, auditable and recoverable.
 - [x] Integrated Otari MCP tool discovery using `GET /api/v1/mcp/servers/{server_id}/tools`.
 - [x] Verified discovery of allowlisted tools and captured the returned `server_revision`.
 
+### Policy Schema & Validation
+
+- [x] Implemented strict Pydantic models for policy schema v1.
+- [x] Added strict JSON parsing with unknown-field rejection.
+- [x] Added numeric bounds validation for policy limits.
+- [x] Added semantic validation for contradictory policies.
+- [x] Added policy parsing and validation tests.
 
 ## Running Locally
 
@@ -88,6 +95,10 @@ TrustRail/
 │   │   ├── exceptions.py
 │   │   └── mcp.py
 │   ├── policy/
+│   │   ├── __init__.py
+│   │   ├── models.py
+│   │   ├── parser.py
+│   │   └── validator.py
 │   ├── authz/
 │   ├── facts/
 │   ├── txn/
@@ -104,8 +115,10 @@ TrustRail/
 │   └── server.py
 │
 ├── tests/
-│   └── otari/
-│       └── test_mcp.py
+│   ├── otari/
+│   │   └── test_mcp.py
+│   └── policy/
+│       ├── test_parser.py
 │
 ├── scripts/
 │   ├── discover_otari_mcp.py
