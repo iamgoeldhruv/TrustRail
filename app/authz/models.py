@@ -36,3 +36,6 @@ class Action(StrictModel):
 class Decision(StrictModel):
     decision: DecisionKind
     reasons: list[str] = Field(default_factory=list)
+
+class RunState(StrictModel):
+    budget_consumed_actions: int = Field(ge=0)

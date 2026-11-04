@@ -70,7 +70,13 @@ human-approved, auditable and recoverable.
 - [x] Defined typed Fact models for GitHub issue attributes.
 - [x] Added Action model for representing agent-proposed operations.
 - [x] Added Decision model with authorization outcomes and reason codes.
+### Authorization Engine
 
+- [x] Implemented deterministic policy-based authorization evaluation.
+- [x] Added checks for action permissions, issue state, inactivity and priority.
+- [x] Enforced fail-closed behavior for missing priority and unavailable facts.
+- [x] Added action-budget enforcement and approval decisions.
+- [x] Added authorization engine tests covering decision rules and edge cases.
 ## Running Locally
 
 ``` bash
@@ -107,7 +113,8 @@ TrustRail/
 │   │   └── validator.py
 │   ├── authz/
 │   │   ├── __init__.py
-│   │   └── models.py
+│   │   ├── models.py
+│   │   └── engine.py
 │   ├── facts/
 │   ├── txn/
 │   ├── approvals/
@@ -125,9 +132,10 @@ TrustRail/
 ├── tests/
 │   ├── otari/
 │   │   └── test_mcp.py
-│   └── policy/
-│       ├── test_parser.py
-│
+│   ├── policy/
+│   │   └── test_parser.py
+│   └── authz/
+│       └── test_engine.py
 ├── scripts/
 │   ├── discover_otari_mcp.py
 │   └── execute_otari_mcp.py
