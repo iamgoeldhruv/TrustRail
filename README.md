@@ -10,7 +10,7 @@ human-approved, auditable and recoverable.
 -   FastAPI
 -   Pydantic
 -   Pydantic Settings
--   SQLite (planned)
+-   SQLite
 -   MCP Python SDK
 -   HTTPX
 -   Pytest
@@ -84,11 +84,45 @@ human-approved, auditable and recoverable.
 - [x] Added transition validation to enforce valid state transitions.
 - [x] Implemented custom `InvalidTransitionError` for illegal transitions.
 - [x] Added tests covering valid transitions, invalid transitions, terminal states and transition-table completeness.
+### SQLite Persistence
+
+-   [x] Added SQLite connection management with foreign-key enforcement,
+    busy-timeout handling, row-based results and automatic database-directory
+    creation.
+-   [x] Added ordered, atomic SQL migrations with migration history tracking.
+-   [x] Added the initial policy, run, transaction, approval and event schema
+    with transaction query indexes.
+-   [x] Added typed transaction models and a `TransactionStore` for creating,
+    retrieving, updating and listing transactions.
+-   [x] Enforced transaction state transitions through the existing state
+    machine before status updates.
+-   [x] Added deterministic JSON serialization and UTC ISO 8601 timestamps.
+-   [x] Integrated migrations into the FastAPI lifespan so the configured
+    database is initialized before the application accepts requests.
+-   [x] Added database migration and persistence tests using temporary SQLite
+    databases.
+
 ## Running Locally
 
 ``` bash
 source .venv/bin/activate
 make run
+```
+
+Database migrations run automatically during application startup. The database
+path defaults to `./data/trustrail.db` and can be overridden with
+`TR_DB_PATH`:
+
+``` bash
+TR_DB_PATH=./data/dev.db make run
+```
+
+To run the test suite and development checks:
+
+``` bash
+pytest
+ruff check app tests
+mypy app
 ```
 
 ## Directory Structure
@@ -123,11 +157,17 @@ TrustRail/
 │   │   ├── models.py
 │   │   └── engine.py
 │   ├── facts/
-├── txn/
-│   ├── __init__.py
-│   ├── states.py
-│   ├── exceptions.py
-│   └── transitions.py
+│   ├── db/
+│   │   ├── __init__.py
+│   │   ├── connection.py
+│   │   └── migrations.py
+│   ├── txn/
+│   │   ├── __init__.py
+│   │   ├── states.py
+│   │   ├── exceptions.py
+│   │   ├── transitions.py
+│   │   ├── models.py
+│   │   └── store.py
 │   ├── approvals/
 │   ├── ledger/
 │   ├── agent/
@@ -141,6 +181,9 @@ TrustRail/
 │   └── server.py
 │
 ├── tests/
+│   ├── db/
+│   │   ├── test_connection.py
+│   │   └── test_migrations.py
 │   ├── otari/
 │   │   └── test_mcp.py
 │   ├── policy/
@@ -149,6 +192,9 @@ TrustRail/
 │       └── test_engine.py
 │   ├── txn/
 │   │   └── test_transitions.py
+├── migrations/
+│   ├── 001_initial_schema.sql
+│   └── 002_transaction_indexes.sql
 ├── scripts/
 │   ├── discover_otari_mcp.py
 │   └── execute_otari_mcp.py

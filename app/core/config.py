@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # # TrustRail configuration
     # tr_admin_token: str
-    # tr_db_path: str = "./data/trustrail.db"
+    tr_db_path: str = "./data/trustrail.db"
 
     # # GitHub MCP configuration
     # mcp_github_pat: str
