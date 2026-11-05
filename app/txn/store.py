@@ -229,3 +229,40 @@ class TransactionStore:
             except sqlite3.Error:
                 connection.rollback()
                 raise
+
+    def recover_on_start(self) -> int:
+
+        expected_state = TransactionState.DISPATCHING
+
+        target_state = transition(
+            expected_state,
+            TransactionState.INDETERMINATE,
+        )
+
+        updated_at = _utc_now().isoformat()
+
+        with get_connection(self.db_path) as connection:
+            try:
+                cursor = connection.execute(
+                    """
+                    UPDATE transactions
+                    SET status = ?,
+                        updated_at = ?
+                    WHERE status = ?
+                    """,
+                    (
+                        target_state.value,
+                        updated_at,
+                        expected_state.value,
+                    ),
+                )
+
+                recovered_count = cursor.rowcount
+
+                connection.commit()
+
+                return recovered_count
+
+            except sqlite3.Error:
+                connection.rollback()
+                raise

@@ -105,6 +105,10 @@ human-approved, auditable and recoverable.
       database update (`PRECHECK` → `DISPATCHING`) and rows-affected validation.
 -   [x] Added tests covering successful claims, repeated claims, ineligible states,
       nonexistent transactions, timestamp updates and concurrent claim attempts.
+-   [x] Implemented startup recovery to move transactions left in
+      `DISPATCHING` to `INDETERMINATE` after application restarts.
+-   [x] Added recovery tests covering multiple transactions, unchanged states
+      and idempotent execution.
 
 ## Running Locally
 

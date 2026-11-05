@@ -27,7 +27,7 @@ def create_transaction(store):
         with get_connection(store.db_path) as connection:
             connection.execute(
                 """
-                INSERT INTO policies (
+                INSERT OR IGNORE INTO policies (
                     id, version, nl_text, json, status, created_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -44,7 +44,7 @@ def create_transaction(store):
 
             connection.execute(
                 """
-                INSERT INTO runs (
+                INSERT OR IGNORE INTO runs (
                     id, policy_id, user_request, planner_model, created_at
                 )
                 VALUES (?, ?, ?, ?, ?)
@@ -171,3 +171,94 @@ def test_concurrent_claims_only_one_worker_succeeds(
 
     assert updated is not None
     assert updated.status == TransactionState.DISPATCHING
+
+
+def test_recover_on_start_recovers_single_dispatching_transaction(
+    store,
+    create_transaction,
+):
+    transaction = create_transaction(
+        status=TransactionState.DISPATCHING
+    )
+
+    recovered_count = store.recover_on_start()
+
+    assert recovered_count == 1
+
+    updated = store.get_transaction(transaction.id)
+
+    assert updated is not None
+    assert updated.status == TransactionState.INDETERMINATE
+
+
+def test_recover_on_start_recovers_multiple_dispatching_transactions(
+    store,
+    create_transaction,
+):
+    first = create_transaction()
+    second = create_transaction()
+
+    store.claim_for_dispatch(first.id)
+    store.claim_for_dispatch(second.id)
+
+    recovered_count = store.recover_on_start()
+
+    assert recovered_count == 2
+
+    first_updated = store.get_transaction(first.id)
+    second_updated = store.get_transaction(second.id)
+
+    assert first_updated is not None
+    assert second_updated is not None
+
+    assert first_updated.status == TransactionState.INDETERMINATE
+    assert second_updated.status == TransactionState.INDETERMINATE
+
+
+def test_recover_on_start_does_not_modify_other_states(
+    store,
+    create_transaction,
+):
+    transaction = create_transaction(
+        status=TransactionState.PRECHECK
+    )
+
+    recovered_count = store.recover_on_start()
+
+    assert recovered_count == 0
+
+    updated = store.get_transaction(transaction.id)
+
+    assert updated is not None
+    assert updated.status == TransactionState.PRECHECK
+
+
+def test_recover_on_start_returns_zero_when_nothing_to_recover(
+    store,
+    create_transaction,
+):
+    create_transaction(status=TransactionState.SUCCEEDED)
+
+    recovered_count = store.recover_on_start()
+
+    assert recovered_count == 0
+
+
+def test_recover_on_start_is_idempotent(
+    store,
+    create_transaction,
+):
+    transaction = create_transaction(
+        status=TransactionState.DISPATCHING
+    )
+
+    first_recovery = store.recover_on_start()
+    second_recovery = store.recover_on_start()
+
+    assert first_recovery == 1
+    assert second_recovery == 0
+
+    updated = store.get_transaction(transaction.id)
+
+    assert updated is not None
+    assert updated.status == TransactionState.INDETERMINATE
