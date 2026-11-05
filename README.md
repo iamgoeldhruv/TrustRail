@@ -119,6 +119,16 @@ ruff check app tests
 mypy app
 ```
 
+The local Fake Otari server can be run independently for manual integration
+testing:
+
+```bash
+python -m app.fakeotari.app
+```
+
+It listens on `http://localhost:8001` by default and exposes the same
+`/api/v1` chat-completion and MCP endpoints used by the production clients.
+
 ## Directory Structure
 
 ```text
