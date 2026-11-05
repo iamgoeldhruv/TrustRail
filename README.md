@@ -77,6 +77,13 @@ human-approved, auditable and recoverable.
 - [x] Enforced fail-closed behavior for missing priority and unavailable facts.
 - [x] Added action-budget enforcement and approval decisions.
 - [x] Added authorization engine tests covering decision rules and edge cases.
+### Transaction State Machine
+
+- [x] Defined explicit transaction states using Python Enum.
+- [x] Implemented centralized allowed-transition table using immutable sets.
+- [x] Added transition validation to enforce valid state transitions.
+- [x] Implemented custom `InvalidTransitionError` for illegal transitions.
+- [x] Added tests covering valid transitions, invalid transitions, terminal states and transition-table completeness.
 ## Running Locally
 
 ``` bash
@@ -116,7 +123,11 @@ TrustRail/
 │   │   ├── models.py
 │   │   └── engine.py
 │   ├── facts/
-│   ├── txn/
+├── txn/
+│   ├── __init__.py
+│   ├── states.py
+│   ├── exceptions.py
+│   └── transitions.py
 │   ├── approvals/
 │   ├── ledger/
 │   ├── agent/
@@ -136,6 +147,8 @@ TrustRail/
 │   │   └── test_parser.py
 │   └── authz/
 │       └── test_engine.py
+│   ├── txn/
+│   │   └── test_transitions.py
 ├── scripts/
 │   ├── discover_otari_mcp.py
 │   └── execute_otari_mcp.py
