@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import json
@@ -8,6 +9,8 @@ from typing import Any
 from uuid import UUID
 
 from app.db.connection import get_connection
+from app.ledger.models import LedgerEventCreate
+from app.ledger.store import LedgerStore
 from app.txn.exceptions import TransactionNotFoundError
 from app.txn.models import Transaction, TransactionCreate
 from app.txn.states import TransactionState
@@ -34,7 +37,11 @@ def _row_to_transaction(row: sqlite3.Row) -> Transaction:
             args_hash=row["args_hash"],
             status=TransactionState(row["status"]),
             server_revision=row["server_revision"],
-            facts=json.loads(row["facts_json"]) if row["facts_json"] is not None else None,
+            facts=(
+                json.loads(row["facts_json"])
+                if row["facts_json"] is not None
+                else None
+            ),
             approval_id=row["approval_id"],
             otari_request_ids=(
                 json.loads(row["otari_request_ids_json"])
@@ -54,9 +61,12 @@ class TransactionStore:
 
     def __init__(self, db_path: str | Path | None = None) -> None:
         self.db_path = db_path
+        self.ledger_store = LedgerStore(db_path)
 
-    
-    def create_transaction(self, transaction: TransactionCreate) -> Transaction:
+    def create_transaction(
+        self,
+        transaction: TransactionCreate,
+    ) -> Transaction:
         now = _utc_now()
         created_at = transaction.created_at or now
         updated_at = transaction.updated_at or created_at
@@ -81,13 +91,17 @@ class TransactionStore:
                         transaction.args_hash,
                         transaction.status.value,
                         transaction.server_revision,
-                        _json_dumps(transaction.facts)
-                        if transaction.facts is not None
-                        else None,
+                        (
+                            _json_dumps(transaction.facts)
+                            if transaction.facts is not None
+                            else None
+                        ),
                         transaction.approval_id,
-                        _json_dumps(transaction.otari_request_ids)
-                        if transaction.otari_request_ids is not None
-                        else None,
+                        (
+                            _json_dumps(transaction.otari_request_ids)
+                            if transaction.otari_request_ids is not None
+                            else None
+                        ),
                         transaction.attempt,
                         created_at.isoformat(),
                         updated_at.isoformat(),
@@ -106,26 +120,38 @@ class TransactionStore:
             updated_at=updated_at,
         )
 
-
-    def get_transaction(self, transaction_id: UUID | str) -> Transaction | None:
+    def get_transaction(
+        self,
+        transaction_id: UUID | str,
+    ) -> Transaction | None:
         with get_connection(self.db_path) as connection:
             row = connection.execute(
                 "SELECT * FROM transactions WHERE id = ?",
                 (str(transaction_id),),
             ).fetchone()
+
         return _row_to_transaction(row) if row is not None else None
 
-    
     def update_transaction_status(
         self,
         transaction_id: UUID | str,
         target_state: TransactionState,
     ) -> Transaction:
+        """
+        Update transaction status and append its ledger event atomically.
+
+        If either the status update or ledger append fails, both are rolled back.
+        """
+
+        transaction_id = str(transaction_id)
+
         with get_connection(self.db_path) as connection:
             try:
+                connection.execute("BEGIN IMMEDIATE")
+
                 row = connection.execute(
                     "SELECT * FROM transactions WHERE id = ?",
-                    (str(transaction_id),),
+                    (transaction_id,),
                 ).fetchone()
 
                 if row is None:
@@ -142,12 +168,24 @@ class TransactionStore:
                     SET status = ?, updated_at = ?
                     WHERE id = ?
                     """,
-                    (next_state.value, updated_at, str(transaction_id)),
+                    (next_state.value, updated_at, transaction_id),
+                )
+
+                self.ledger_store.append_event_in_transaction(
+                    connection,
+                    LedgerEventCreate(
+                        txn_id=transaction_id,
+                        type="TRANSACTION_STATUS_CHANGED",
+                        payload={
+                            "from_status": current_state.value,
+                            "to_status": next_state.value,
+                        },
+                    ),
                 )
 
                 connection.commit()
 
-            except sqlite3.Error:
+            except Exception:
                 connection.rollback()
                 raise
 
@@ -158,7 +196,6 @@ class TransactionStore:
 
         return updated
 
-
     def list_transactions(
         self,
         *,
@@ -167,34 +204,43 @@ class TransactionStore:
     ) -> list[Transaction]:
         clauses: list[str] = []
         parameters: list[str] = []
+
         if status is not None:
             clauses.append("status = ?")
             parameters.append(status.value)
+
         if run_id is not None:
             clauses.append("run_id = ?")
             parameters.append(run_id)
 
         query = "SELECT * FROM transactions"
+
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
+
         query += " ORDER BY created_at, id"
 
         with get_connection(self.db_path) as connection:
             rows = connection.execute(query, parameters).fetchall()
+
         return [_row_to_transaction(row) for row in rows]
 
-
-    def claim_for_dispatch(self, transaction_id: UUID | str) -> bool:
+    def claim_for_dispatch(
+        self,
+        transaction_id: UUID | str,
+    ) -> bool:
         """
         Atomically claim a PRECHECK transaction for dispatch.
 
-        Returns True if claimed.
-        Returns False if the transaction does not exist
+        The state transition and ledger event are committed together.
+
+        Returns True if claimed, False if the transaction does not exist
         or is not in PRECHECK.
         """
 
-        expected_state = TransactionState.PRECHECK
+        transaction_id = str(transaction_id)
 
+        expected_state = TransactionState.PRECHECK
         target_state = transition(
             expected_state,
             TransactionState.DISPATCHING,
@@ -204,6 +250,8 @@ class TransactionStore:
 
         with get_connection(self.db_path) as connection:
             try:
+                connection.execute("BEGIN IMMEDIATE")
+
                 cursor = connection.execute(
                     """
                     UPDATE transactions
@@ -215,25 +263,43 @@ class TransactionStore:
                     (
                         target_state.value,
                         updated_at,
-                        str(transaction_id),
+                        transaction_id,
                         expected_state.value,
                     ),
                 )
 
                 claimed = cursor.rowcount == 1
 
-                connection.commit()
+                if claimed:
+                    self.ledger_store.append_event_in_transaction(
+                        connection,
+                        LedgerEventCreate(
+                            txn_id=transaction_id,
+                            type="TRANSACTION_STATUS_CHANGED",
+                            payload={
+                                "from_status": expected_state.value,
+                                "to_status": target_state.value,
+                                "reason": "dispatch_claimed",
+                            },
+                        ),
+                    )
 
+                connection.commit()
                 return claimed
 
-            except sqlite3.Error:
+            except Exception:
                 connection.rollback()
                 raise
 
     def recover_on_start(self) -> int:
+        """
+        Recover transactions left in DISPATCHING after a process restart.
+
+        Each transition to INDETERMINATE is recorded in the ledger.
+        All recovered states and events are committed atomically.
+        """
 
         expected_state = TransactionState.DISPATCHING
-
         target_state = transition(
             expected_state,
             TransactionState.INDETERMINATE,
@@ -243,26 +309,51 @@ class TransactionStore:
 
         with get_connection(self.db_path) as connection:
             try:
-                cursor = connection.execute(
-                    """
-                    UPDATE transactions
-                    SET status = ?,
-                        updated_at = ?
-                    WHERE status = ?
-                    """,
-                    (
-                        target_state.value,
-                        updated_at,
-                        expected_state.value,
-                    ),
-                )
+                connection.execute("BEGIN IMMEDIATE")
 
-                recovered_count = cursor.rowcount
+                rows = connection.execute(
+                    """
+                    SELECT id
+                    FROM transactions
+                    WHERE status = ?
+                    ORDER BY id
+                    """,
+                    (expected_state.value,),
+                ).fetchall()
+
+                for row in rows:
+                    transaction_id = row["id"]
+
+                    connection.execute(
+                        """
+                        UPDATE transactions
+                        SET status = ?, updated_at = ?
+                        WHERE id = ? AND status = ?
+                        """,
+                        (
+                            target_state.value,
+                            updated_at,
+                            transaction_id,
+                            expected_state.value,
+                        ),
+                    )
+
+                    self.ledger_store.append_event_in_transaction(
+                        connection,
+                        LedgerEventCreate(
+                            txn_id=transaction_id,
+                            type="TRANSACTION_STATUS_CHANGED",
+                            payload={
+                                "from_status": expected_state.value,
+                                "to_status": target_state.value,
+                                "reason": "startup_recovery",
+                            },
+                        ),
+                    )
 
                 connection.commit()
+                return len(rows)
 
-                return recovered_count
-
-            except sqlite3.Error:
+            except Exception:
                 connection.rollback()
                 raise
