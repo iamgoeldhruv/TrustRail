@@ -101,6 +101,10 @@ human-approved, auditable and recoverable.
     database is initialized before the application accepts requests.
 -   [x] Added database migration and persistence tests using temporary SQLite
     databases.
+-   [x] Implemented atomic transaction claiming for dispatch using a conditional
+      database update (`PRECHECK` → `DISPATCHING`) and rows-affected validation.
+-   [x] Added tests covering successful claims, repeated claims, ineligible states,
+      nonexistent transactions, timestamp updates and concurrent claim attempts.
 
 ## Running Locally
 
@@ -192,6 +196,7 @@ TrustRail/
 │       └── test_engine.py
 │   ├── txn/
 │   │   └── test_transitions.py
+│       └── test_store.py
 ├── migrations/
 │   ├── 001_initial_schema.sql
 │   └── 002_transaction_indexes.sql

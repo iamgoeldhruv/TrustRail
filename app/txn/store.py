@@ -55,13 +55,14 @@ class TransactionStore:
     def __init__(self, db_path: str | Path | None = None) -> None:
         self.db_path = db_path
 
+    
     def create_transaction(self, transaction: TransactionCreate) -> Transaction:
         now = _utc_now()
         created_at = transaction.created_at or now
         updated_at = transaction.updated_at or created_at
 
-        try:
-            with get_connection(self.db_path) as connection:
+        with get_connection(self.db_path) as connection:
+            try:
                 connection.execute(
                     """
                     INSERT INTO transactions (
@@ -92,17 +93,19 @@ class TransactionStore:
                         updated_at.isoformat(),
                     ),
                 )
+
                 connection.commit()
-        except sqlite3.Error:
-            if "connection" in locals() and connection.in_transaction:
+
+            except sqlite3.Error:
                 connection.rollback()
-            raise
+                raise
 
         return Transaction(
             **transaction.model_dump(exclude={"created_at", "updated_at"}),
             created_at=created_at,
             updated_at=updated_at,
         )
+
 
     def get_transaction(self, transaction_id: UUID | str) -> Transaction | None:
         with get_connection(self.db_path) as connection:
@@ -112,23 +115,27 @@ class TransactionStore:
             ).fetchone()
         return _row_to_transaction(row) if row is not None else None
 
+    
     def update_transaction_status(
         self,
         transaction_id: UUID | str,
         target_state: TransactionState,
     ) -> Transaction:
-        try:
-            with get_connection(self.db_path) as connection:
+        with get_connection(self.db_path) as connection:
+            try:
                 row = connection.execute(
                     "SELECT * FROM transactions WHERE id = ?",
                     (str(transaction_id),),
                 ).fetchone()
+
                 if row is None:
                     raise TransactionNotFoundError(transaction_id)
 
                 current_state = TransactionState(row["status"])
                 next_state = transition(current_state, target_state)
+
                 updated_at = _utc_now().isoformat()
+
                 connection.execute(
                     """
                     UPDATE transactions
@@ -137,16 +144,20 @@ class TransactionStore:
                     """,
                     (next_state.value, updated_at, str(transaction_id)),
                 )
+
                 connection.commit()
-        except sqlite3.Error:
-            if "connection" in locals() and connection.in_transaction:
+
+            except sqlite3.Error:
                 connection.rollback()
-            raise
+                raise
 
         updated = self.get_transaction(transaction_id)
+
         if updated is None:
             raise TransactionNotFoundError(transaction_id)
+
         return updated
+
 
     def list_transactions(
         self,
@@ -171,3 +182,50 @@ class TransactionStore:
         with get_connection(self.db_path) as connection:
             rows = connection.execute(query, parameters).fetchall()
         return [_row_to_transaction(row) for row in rows]
+
+
+    def claim_for_dispatch(self, transaction_id: UUID | str) -> bool:
+        """
+        Atomically claim a PRECHECK transaction for dispatch.
+
+        Returns True if claimed.
+        Returns False if the transaction does not exist
+        or is not in PRECHECK.
+        """
+
+        expected_state = TransactionState.PRECHECK
+
+        target_state = transition(
+            expected_state,
+            TransactionState.DISPATCHING,
+        )
+
+        updated_at = _utc_now().isoformat()
+
+        with get_connection(self.db_path) as connection:
+            try:
+                cursor = connection.execute(
+                    """
+                    UPDATE transactions
+                    SET status = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    AND status = ?
+                    """,
+                    (
+                        target_state.value,
+                        updated_at,
+                        str(transaction_id),
+                        expected_state.value,
+                    ),
+                )
+
+                claimed = cursor.rowcount == 1
+
+                connection.commit()
+
+                return claimed
+
+            except sqlite3.Error:
+                connection.rollback()
+                raise
