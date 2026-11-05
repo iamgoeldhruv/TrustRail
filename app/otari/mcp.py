@@ -1,22 +1,43 @@
-
 from typing import Any
 from urllib.parse import quote
 from uuid import UUID
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+)
+
+from app.otari.exceptions import (
+    OtariMCPError,
+    OtariMCPNotStartedError,
+    OtariMCPOutcomeUnknownError,
+    OtariMCPResponseError,
+    OtariMCPServerChangedError,
+)
+from app.otari.exceptions import (
+    OtariExecutionState,
+    OtariMCPErrorBody,
+    OtariMCPErrorCode,
+)
 
 
 class MCPTool(BaseModel):
+    """A tool exposed by a registered MCP server."""
+
     model_config = ConfigDict(extra="allow")
 
     name: str
     description: str | None = None
     input_schema: dict[str, Any] = Field(default_factory=dict)
-    annotations: dict[str, Any] |None=None
+    annotations: dict[str, Any] | None = None
 
 
 class MCPDiscoveryResponse(BaseModel):
+    """Response returned by Otari MCP tool discovery."""
+
     model_config = ConfigDict(extra="allow")
 
     server_id: str
@@ -24,33 +45,44 @@ class MCPDiscoveryResponse(BaseModel):
     tools: list[MCPTool]
     warnings: list[dict[str, Any]] = Field(default_factory=list)
 
+    # HTTP response metadata, not part of the Otari JSON body.
+    otari_request_id: str | None = Field(
+        default=None,
+        exclude=True,
+    )
+
 
 class MCPExecutionResponse(BaseModel):
+    """Native MCP execution result returned by Otari."""
+
     model_config = ConfigDict(extra="allow")
 
     content: list[dict[str, Any]] = Field(default_factory=list)
     isError: bool = False
     structuredContent: dict[str, Any] | None = None
 
-
-class OtariMCPError(Exception):
-    def __init__(
-        self,
-        message: str,
-        status_code: int | None = None,
-        code: str | None = None,
-        execution_state: str | None = None,
-        request_id: str | None = None,
-    ) -> None:
-        super().__init__(message)
-
-        self.status_code = status_code
-        self.code = code
-        self.execution_state = execution_state
-        self.request_id = request_id
+    # HTTP response metadata, not part of the native MCP result.
+    otari_request_id: str | None = Field(
+        default=None,
+        exclude=True,
+    )
 
 
 class OtariMCPClient:
+    """
+    Async client for Otari caller-orchestrated MCP endpoints.
+
+    Responsibilities:
+    - Discover tools exposed by a registered MCP server.
+    - Execute an explicitly authorized MCP tool call.
+    - Parse Otari's shared error response.
+    - Preserve Otari request IDs.
+    - Classify execution certainty conservatively.
+
+    Important:
+    POST /mcp/execute is called exactly once.
+    This client does not implement automatic retries.
+    """
 
     def __init__(
         self,
@@ -70,43 +102,138 @@ class OtariMCPClient:
             transport=transport,
         )
 
+    @staticmethod
+    def _parse_error_response(
+        response: httpx.Response,
+        *,
+        execution_request: bool,
+    ) -> OtariMCPError:
+        """
+        Parse Otari's shared MCP error response.
+
+        Both discovery and execution endpoints use the same
+        JSON error structure.
+
+        Header and body request IDs are preserved separately.
+
+        If an execution error response cannot be parsed,
+        its outcome is classified as unknown.
+        """
+
+        header_request_id = response.headers.get("Otari-Request-ID")
+        retry_after = response.headers.get("Retry-After")
+
+        try:
+            payload = response.json()
+
+            error_body = OtariMCPErrorBody.model_validate_json(response.content)
+
+        except (ValueError, ValidationError, TypeError):
+            message = f"Otari returned an invalid MCP error response (HTTP {response.status_code})."
+
+            if execution_request:
+                return OtariMCPOutcomeUnknownError(
+                    message=message,
+                    status_code=response.status_code,
+                    execution_state="outcome_unknown",
+                    header_request_id=header_request_id,
+                    retry_after=retry_after,
+                )
+
+            return OtariMCPResponseError(
+                message=message,
+                status_code=response.status_code,
+                header_request_id=header_request_id,
+                retry_after=retry_after,
+            )
+
+        common = {
+            "message": error_body.detail,
+            "status_code": response.status_code,
+            "code": error_body.code.value,
+            "execution_state": error_body.execution_state.value,
+            "body_request_id": error_body.request_id,
+            "header_request_id": header_request_id,
+            "retry_after": retry_after,
+        }
+
+        # A stale server revision invalidates the approval.
+        if error_body.code == OtariMCPErrorCode.MCP_SERVER_CHANGED:
+            return OtariMCPServerChangedError(**common)
+
+        # Otari explicitly reports that dispatch started
+        # but no definitive result was returned.
+        if error_body.execution_state == OtariExecutionState.OUTCOME_UNKNOWN:
+            return OtariMCPOutcomeUnknownError(**common)
+
+        # Otari confirms that dispatch did not start.
+        if error_body.execution_state == OtariExecutionState.NOT_STARTED:
+            return OtariMCPNotStartedError(**common)
+
+        # Defensive fallback.
+        if execution_request:
+            return OtariMCPOutcomeUnknownError(
+                message=error_body.detail,
+                status_code=response.status_code,
+                code=error_body.code.value,
+                execution_state="outcome_unknown",
+                body_request_id=error_body.request_id,
+                header_request_id=header_request_id,
+                retry_after=retry_after,
+            )
+
+        return OtariMCPError(**common)
+
     async def discover(
         self,
         server_id: str,
     ) -> MCPDiscoveryResponse:
+        """
+        Discover tools exposed by a registered Otari MCP server.
+
+        Returns:
+            MCPDiscoveryResponse containing:
+            - server_id
+            - server_revision
+            - tools
+            - warnings
+            - Otari response request ID
+        """
 
         if not server_id.strip():
             raise ValueError("MCP server ID cannot be empty")
 
         encoded_id = quote(server_id, safe="")
+
         path = f"mcp/servers/{encoded_id}/tools"
 
         try:
             response = await self._client.get(path)
-            response.raise_for_status()
-
-        except httpx.HTTPStatusError as exc:
-            raise OtariMCPError(
-                message=(
-                    f"Otari discovery failed with HTTP "
-                    f"{exc.response.status_code}: {exc.response.text}"
-                ),
-                status_code=exc.response.status_code,
-            ) from exc
 
         except httpx.RequestError as exc:
             raise OtariMCPError(
-                message=f"Could not connect to Otari: {exc}"
+                message=f"Could not connect to Otari: {exc}",
             ) from exc
 
-        try:
-            return MCPDiscoveryResponse.model_validate(
-                response.json()
+        if not response.is_success:
+            raise self._parse_error_response(
+                response,
+                execution_request=False,
             )
-        except Exception as exc:
-            raise OtariMCPError(
-                message=f"Invalid Otari discovery response: {exc}"
+
+        try:
+            discovery = MCPDiscoveryResponse.model_validate(response.json())
+
+        except (ValueError, ValidationError, TypeError) as exc:
+            raise OtariMCPResponseError(
+                message=("Otari returned an invalid MCP discovery response."),
+                status_code=response.status_code,
+                header_request_id=response.headers.get("Otari-Request-ID"),
             ) from exc
+
+        return discovery.model_copy(
+            update={"otari_request_id": response.headers.get("Otari-Request-ID")}
+        )
 
     async def execute(
         self,
@@ -117,6 +244,16 @@ class OtariMCPClient:
         server_revision: str,
         client_execution_id: UUID,
     ) -> MCPExecutionResponse:
+        """
+        Execute one MCP tool call through Otari.
+
+        IMPORTANT:
+        Exactly one HTTP request is sent.
+
+        A network failure or ambiguous response is classified
+        as outcome_unknown. The caller must not automatically
+        retry this operation.
+        """
 
         if not server_id.strip():
             raise ValueError("MCP server ID cannot be empty")
@@ -139,58 +276,47 @@ class OtariMCPClient:
         }
 
         try:
+            # Exactly one execution attempt.
             response = await self._client.post(
                 "mcp/execute",
                 json=payload,
             )
 
         except httpx.RequestError as exc:
-            raise OtariMCPError(
-                message=f"Otari MCP execution outcome is unknown: {exc}",
+            raise OtariMCPOutcomeUnknownError(
+                message=(
+                    "Otari execution request failed without a "
+                    "definitive response. The operation may have executed."
+                ),
                 execution_state="outcome_unknown",
             ) from exc
 
-        request_id = response.headers.get("Otari-Request-ID")
-
         if not response.is_success:
-            try:
-                error_body = response.json()
-            except ValueError:
-                error_body = {}
-
-            if not isinstance(error_body, dict):
-                error_body = {}
-
-            detail = error_body.get("detail")
-            message = (
-                detail
-                if isinstance(detail, str)
-                else f"Otari MCP execution failed with HTTP "
-                     f"{response.status_code}"
-            )
-
-            raise OtariMCPError(
-                message=message,
-                status_code=response.status_code,
-                code=error_body.get("code"),
-                execution_state=error_body.get("execution_state"),
-                request_id=error_body.get("request_id") or request_id,
+            raise self._parse_error_response(
+                response,
+                execution_request=True,
             )
 
         try:
-            result = response.json()
+            result = MCPExecutionResponse.model_validate(response.json())
 
-            return MCPExecutionResponse.model_validate(result)
-
-        except Exception as exc:
-            raise OtariMCPError(
-                message=f"Invalid Otari MCP execution response: {exc}",
+        except (ValueError, ValidationError, TypeError) as exc:
+            raise OtariMCPOutcomeUnknownError(
+                message=(
+                    "Otari returned an invalid execution response. The operation may have executed."
+                ),
                 status_code=response.status_code,
                 execution_state="outcome_unknown",
-                request_id=request_id,
+                header_request_id=response.headers.get("Otari-Request-ID"),
             ) from exc
 
+        return result.model_copy(
+            update={"otari_request_id": response.headers.get("Otari-Request-ID")}
+        )
+
     async def aclose(self) -> None:
+        """Close the underlying HTTPX client."""
+
         await self._client.aclose()
 
     async def __aenter__(self) -> "OtariMCPClient":

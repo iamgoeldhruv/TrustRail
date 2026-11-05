@@ -32,8 +32,14 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Implemented HTTP client lifecycle management.
 - [x] Created `trustrail ping` CLI command.
 - [x] Verified inference through the hosted Otari gateway.
-- [x] Implemented asynchronous Otari MCP discovery and execution client.
-- [x] Added Pydantic response models and error handling.
+- [x] Implemented asynchronous Otari MCP discovery (`Discover(serverID)`) and execution (`Execute(req)`) client.
+- [x] Added Pydantic response models and typed MCP error handling.
+- [x] Implemented parsing of Otari's shared error response, including `code`, `execution_state` and `request_id`.
+- [x] Added typed exception classification for `not_started`, `outcome_unknown` and stale server revisions.
+- [x] Captured and preserved the `Otari-Request-ID` response header separately from the request ID in the error body.
+- [x] Preserved `Retry-After` metadata when provided.
+- [x] Ensured MCP execution makes exactly one HTTP attempt without automatic retries.
+- [x] Added unit tests covering error classification, request-ID handling, malformed responses and single-attempt execution.
 - [x] Created scripts to verify MCP discovery and tool execution.
 - [x] Verified read-only `get_status` execution using a workspace API key.
 - [x] Verified MCP server revision detection and stale revision rejection (HTTP 409).
@@ -119,15 +125,13 @@ ruff check app tests
 mypy app
 ```
 
-The local Fake Otari server can be run independently for manual integration
-testing:
+The local Fake Otari server can be run independently for manual integration testing:
 
 ```bash
 python -m app.fakeotari.app
 ```
 
-It listens on `http://localhost:8001` by default and exposes the same
-`/api/v1` chat-completion and MCP endpoints used by the production clients.
+It listens on `http://localhost:8001` by default and exposes the same `/api/v1` chat-completion and MCP endpoints used by the production clients.
 
 ## Directory Structure
 
