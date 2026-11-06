@@ -33,6 +33,7 @@ class IssueActivityResponse(BaseModel):
     txn_id: str
     marker_comment_count: int
     matching_comment_ids: list[int] = Field(default_factory=list)
+    marker_count: int
 class ListIssuesResponse(BaseModel):
     repository: str
     total: int
@@ -187,6 +188,11 @@ async def get_issue_activity(
         if marker in comment.body
     ]
 
+    marker_count = sum(
+        comment.body.count(marker)
+        for comment in comments
+    )
+
     return IssueActivityResponse(
         repository=settings.mcp_github_repo,
         issue_number=issue.number,
@@ -195,6 +201,7 @@ async def get_issue_activity(
         total_comments=len(comments),
         txn_id=txn_id,
         marker_comment_count=len(matching_comment_ids),
+        marker_count=marker_count,
         matching_comment_ids=matching_comment_ids,
     )
 class CloseIssueResponse(BaseModel):

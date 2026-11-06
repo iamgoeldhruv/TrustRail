@@ -137,6 +137,7 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Exposed GitHub tools through Streamable HTTP.
 - [x] Verified GitHub REST API authentication and read operations against the actual repository.
 - [x] Manually verified all four MCP tools using MCP Inspector.
+- [x] Implemented `get_issue_activity` to inspect issue state, comments and transaction marker occurrences for reconciliation.
 ### Reconciliation (Initial Implementation)
 
 - [x] Added typed reconciliation evidence and result models.
