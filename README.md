@@ -14,7 +14,8 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - Pytest
 - Ruff
 - MyPy
-
+- MCP Python SDK (Streamable HTTP)
+- HTTPX (Async GitHub REST API client)
 ## Current Progress
 
 ### Project Setup & Scaffolding
@@ -118,7 +119,24 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Added validation for unsupported outcome types.
 - [x] Added parameterized unit tests covering all five execution outcome categories and unsupported inputs.
 - [x] Verified all outcome classifier tests pass.
+### GitHub REST API & MCP Integration
 
+- [x] Created an independent GitHub MCP server package using Python and the MCP SDK.
+- [x] Implemented GitHub configuration using Pydantic Settings.
+- [x] Configured GitHub Personal Access Token (PAT) through environment variables using `SecretStr`.
+- [x] Implemented an asynchronous GitHub REST API client using HTTPX.
+- [x] Added GitHub API authentication, version headers and error handling.
+- [x] Implemented paginated GitHub API requests.
+- [x] Added GitHub response models for issues, labels, users and comments.
+- [x] Implemented `list_issues` MCP tool to retrieve repository issues, filter pull requests and calculate inactivity duration.
+- [x] Implemented `get_issue` MCP tool to retrieve complete issue details.
+- [x] Implemented `get_issue_activity` MCP tool to inspect issue state, comments and TrustRail transaction markers.
+- [x] Implemented `close_issue_with_note` MCP tool to post transaction-marked comments and close GitHub issues.
+- [x] Added transaction markers (`trustrail:txn=<txn_id>`) to support execution reconciliation.
+- [x] Restricted GitHub operations to the repository configured on the MCP server.
+- [x] Exposed GitHub tools through Streamable HTTP.
+- [x] Verified GitHub REST API authentication and read operations against the actual repository.
+- [x] Manually verified all four MCP tools using MCP Inspector.
 ## Running Locally
 
 ```bash
@@ -194,6 +212,12 @@ TrustRail/
 │   ├── scenarios/
 │   └── fakeotari/
 ├── mcp_github/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── errors.py
+│   ├── models.py
+│   ├── client.py
+│   └── server.py
 ├── mcp_spike/
 │   └── server.py
 ├── tests/
@@ -210,7 +234,8 @@ TrustRail/
 │   └── 003_events_append_only.sql
 ├── scripts/
 │   ├── discover_otari_mcp.py
-│   └── execute_otari_mcp.py
+│   ├── execute_otari_mcp.py
+│   └── smoke_github.py
 ├── docs/
 ├── Dockerfile
 ├── requirements.txt
