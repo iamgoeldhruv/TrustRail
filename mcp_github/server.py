@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from mcp_github.client import GitHubClient
 from mcp_github.config import GitHubSettings
 from datetime import datetime, timezone
-
+from mcp.server.transport_security import TransportSecuritySettings
 logger = logging.getLogger("trustrail.mcp.github")
 
 mcp = MCPServer("TrustRail-GitHub")
@@ -298,13 +298,32 @@ async def close_issue_with_note(
         comment_id=comment.id,
         comment_url=comment.html_url,
     )
+def create_mcp_app():
+    railway_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN")
+
+    if railway_domain:
+        security_settings = TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=[
+                railway_domain,
+                f"{railway_domain}:*",
+            ],
+        )
+    else:
+        # Keep the SDK's default localhost protection in development.
+        security_settings = None
+
+    return mcp.streamable_http_app(
+        json_response=True,
+        transport_security=security_settings,
+    )
 
 
 def main() -> None:
     host = "0.0.0.0"
     port = int(os.environ.get("PORT", "8000"))
 
-    mcp_app = mcp.streamable_http_app(json_response=True)
+    mcp_app = create_mcp_app()
 
     logger.info("Starting TrustRail GitHub MCP Server")
 
@@ -314,6 +333,8 @@ def main() -> None:
         port=port,
         log_level="info",
     )
+
+
 
 
 if __name__ == "__main__":
