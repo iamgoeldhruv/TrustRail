@@ -43,6 +43,9 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Created scripts to verify MCP discovery and tool execution.
 - [x] Verified read-only `get_status` execution using a workspace API key.
 - [x] Verified MCP server revision detection and stale revision rejection (HTTP 409).
+- [x] Added a counting HTTPX transport to verify execution request attempts.
+- [x] Configured a 60-second default timeout for the Otari MCP client.
+- [x] Ensured the execution client does not use automatic HTTP retries.
 
 ### MCP Server Spike
 

@@ -88,7 +88,7 @@ class OtariMCPClient:
         self,
         base_url: str,
         api_key: str,
-        timeout: float = 30.0,
+        timeout: float = 60.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._client = httpx.AsyncClient(

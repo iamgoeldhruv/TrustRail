@@ -10,7 +10,9 @@ from app.otari.exceptions import (
     OtariMCPResponseError,
     OtariMCPServerChangedError,
 )
+
 from app.otari.mcp import OtariMCPClient
+from counting_transport import CountingTransport
 
 
 def make_error_response(
@@ -153,28 +155,23 @@ async def test_malformed_discovery_error_is_response_error():
     assert isinstance(error, OtariMCPResponseError)
 
 
+
 @pytest.mark.asyncio
 async def test_execute_sends_exactly_one_request():
-    request_count = 0
-
     def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal request_count
-        request_count += 1
-
         return make_error_response(
             502,
             "mcp_outcome_unknown",
             "outcome_unknown",
         )
 
-    transport = httpx.MockTransport(handler)
+    transport = CountingTransport(httpx.MockTransport(handler))
 
     async with OtariMCPClient(
         base_url="https://example.com/api/v1",
         api_key="test-key",
         transport=transport,
     ) as client:
-
         with pytest.raises(OtariMCPOutcomeUnknownError):
             await client.execute(
                 server_id="server-123",
@@ -184,4 +181,4 @@ async def test_execute_sends_exactly_one_request():
                 client_execution_id=uuid4(),
             )
 
-    assert request_count == 1
+    assert transport.request_count == 1
