@@ -39,6 +39,7 @@ ALLOWED_TRANSITIONS: dict[TransactionState, frozenset[TransactionState]] = {
             TransactionState.FAILED,
             TransactionState.FAILED_SAFE,
             TransactionState.INDETERMINATE,
+            TransactionState.APPROVAL_INVALIDATED,
         }
     ),
     TransactionState.SUCCEEDED: frozenset(),

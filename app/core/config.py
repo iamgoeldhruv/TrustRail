@@ -19,8 +19,11 @@ class Settings(BaseSettings):
     tr_db_path: str = "./data/trustrail.db"
 
     # # GitHub MCP configuration
-    # mcp_github_pat: str
-    # mcp_admin_token: str
+    # GitHub MCP configuration
+    mcp_github_pat: str
+    mcp_github_repo: str
+    mcp_admin_token: str
+    
 
     # # Development configuration
     # fake_otari: bool = False

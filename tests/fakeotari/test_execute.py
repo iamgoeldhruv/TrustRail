@@ -44,6 +44,7 @@ def test_success_and_tool_error_are_distinct() -> None:
             assert error.isError is True
             assert state.invocation_count == 2
             assert state.side_effect_count == 2
+            assert state.execution_request_count == 2
 
     asyncio.run(run())
 

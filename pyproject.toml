@@ -19,6 +19,7 @@ dependencies = [
 [project.scripts]
 trustrail = "app.cli.main:main"
 
+
 [project.optional-dependencies]
 dev = [
     "pytest",
@@ -29,11 +30,13 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["app*", "mcp_spike*"]
+include = ["app*", "mcp_github*", "mcp_spike*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = ["--import-mode=importlib"]
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100

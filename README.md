@@ -14,7 +14,8 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - Pytest
 - Ruff
 - MyPy
-
+- MCP Python SDK (Streamable HTTP)
+- HTTPX (Async GitHub REST API client)
 ## Current Progress
 
 ### Project Setup & Scaffolding
@@ -32,11 +33,20 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Implemented HTTP client lifecycle management.
 - [x] Created `trustrail ping` CLI command.
 - [x] Verified inference through the hosted Otari gateway.
-- [x] Implemented asynchronous Otari MCP discovery and execution client.
-- [x] Added Pydantic response models and error handling.
+- [x] Implemented asynchronous Otari MCP discovery (`Discover(serverID)`) and execution (`Execute(req)`) client.
+- [x] Added Pydantic response models and typed MCP error handling.
+- [x] Implemented parsing of Otari's shared error response, including `code`, `execution_state` and `request_id`.
+- [x] Added typed exception classification for `not_started`, `outcome_unknown` and stale server revisions.
+- [x] Captured and preserved the `Otari-Request-ID` response header separately from the request ID in the error body.
+- [x] Preserved `Retry-After` metadata when provided.
+- [x] Ensured MCP execution makes exactly one HTTP attempt without automatic retries.
+- [x] Added unit tests covering error classification, request-ID handling, malformed responses and single-attempt execution.
 - [x] Created scripts to verify MCP discovery and tool execution.
 - [x] Verified read-only `get_status` execution using a workspace API key.
 - [x] Verified MCP server revision detection and stale revision rejection (HTTP 409).
+- [x] Added a counting HTTPX transport to verify execution request attempts.
+- [x] Configured a 60-second default timeout for the Otari MCP client.
+- [x] Ensured the execution client does not use automatic HTTP retries.
 
 ### MCP Server Spike
 
@@ -98,6 +108,35 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Integrated ledger events with dispatch claiming and startup recovery.
 - [x] Added tests for chain integrity, tampering, append-only enforcement and transaction-ledger atomicity.
 
+### Execution Outcome Classification
+
+- [x] Implemented a centralized execution outcome classifier in `app/txn/outcome_classifier.py`.
+- [x] Added classification of successful MCP execution responses (`isError: false`) as `SUCCEEDED`.
+- [x] Added classification of definitive MCP tool errors (`isError: true`) as `FAILED`.
+- [x] Added classification of Otari `not_started` errors as `FAILED_SAFE`.
+- [x] Added classification of Otari `outcome_unknown` errors as `INDETERMINATE`.
+- [x] Added classification of stale MCP server revision errors (`mcp_server_changed`) as `APPROVAL_INVALIDATED`.
+- [x] Added validation for unsupported outcome types.
+- [x] Added parameterized unit tests covering all five execution outcome categories and unsupported inputs.
+- [x] Verified all outcome classifier tests pass.
+### GitHub REST API & MCP Integration
+
+- [x] Created an independent GitHub MCP server package using Python and the MCP SDK.
+- [x] Implemented GitHub configuration using Pydantic Settings.
+- [x] Configured GitHub Personal Access Token (PAT) through environment variables using `SecretStr`.
+- [x] Implemented an asynchronous GitHub REST API client using HTTPX.
+- [x] Added GitHub API authentication, version headers and error handling.
+- [x] Implemented paginated GitHub API requests.
+- [x] Added GitHub response models for issues, labels, users and comments.
+- [x] Implemented `list_issues` MCP tool to retrieve repository issues, filter pull requests and calculate inactivity duration.
+- [x] Implemented `get_issue` MCP tool to retrieve complete issue details.
+- [x] Implemented `get_issue_activity` MCP tool to inspect issue state, comments and TrustRail transaction markers.
+- [x] Implemented `close_issue_with_note` MCP tool to post transaction-marked comments and close GitHub issues.
+- [x] Added transaction markers (`trustrail:txn=<txn_id>`) to support execution reconciliation.
+- [x] Restricted GitHub operations to the repository configured on the MCP server.
+- [x] Exposed GitHub tools through Streamable HTTP.
+- [x] Verified GitHub REST API authentication and read operations against the actual repository.
+- [x] Manually verified all four MCP tools using MCP Inspector.
 ## Running Locally
 
 ```bash
@@ -119,15 +158,13 @@ ruff check app tests
 mypy app
 ```
 
-The local Fake Otari server can be run independently for manual integration
-testing:
+The local Fake Otari server can be run independently for manual integration testing:
 
 ```bash
 python -m app.fakeotari.app
 ```
 
-It listens on `http://localhost:8001` by default and exposes the same
-`/api/v1` chat-completion and MCP endpoints used by the production clients.
+It listens on `http://localhost:8001` by default and exposes the same `/api/v1` chat-completion and MCP endpoints used by the production clients.
 
 ## Directory Structure
 
@@ -163,6 +200,7 @@ TrustRail/
 │   │   ├── transitions.py
 │   │   ├── models.py
 │   │   └── store.py
+│   |   └── outcome_classifier.py
 │   ├── approvals/
 │   ├── ledger/
 │   │   ├── models.py
@@ -174,6 +212,12 @@ TrustRail/
 │   ├── scenarios/
 │   └── fakeotari/
 ├── mcp_github/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── errors.py
+│   ├── models.py
+│   ├── client.py
+│   └── server.py
 ├── mcp_spike/
 │   └── server.py
 ├── tests/
@@ -190,7 +234,8 @@ TrustRail/
 │   └── 003_events_append_only.sql
 ├── scripts/
 │   ├── discover_otari_mcp.py
-│   └── execute_otari_mcp.py
+│   ├── execute_otari_mcp.py
+│   └── smoke_github.py
 ├── docs/
 ├── Dockerfile
 ├── requirements.txt
