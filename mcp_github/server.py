@@ -12,10 +12,48 @@ from mcp_github.client import GitHubClient
 from mcp_github.config import GitHubSettings
 from datetime import datetime, timezone
 from mcp.server.transport_security import TransportSecuritySettings
+import json
+from pathlib import Path
 logger = logging.getLogger("trustrail.mcp.github")
 
 mcp = MCPServer("TrustRail-GitHub")
 
+def _load_demo_ages(path: Path) -> dict[int, int]:
+    if not path.exists():
+        return {}
+
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            data = json.load(file)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Invalid demo ages configuration: {path}"
+        ) from exc
+
+    if not isinstance(data, dict):
+        raise ValueError("Demo ages configuration must be a JSON object.")
+
+    overrides: dict[int, int] = {}
+
+    for issue_number, inactive_days in data.items():
+        try:
+            number = int(issue_number)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Invalid issue number in demo ages: {issue_number}"
+            ) from exc
+
+        if number <= 0:
+            raise ValueError("Issue numbers must be positive.")
+
+        if type(inactive_days) is not int or inactive_days < 0:
+            raise ValueError(
+                f"Invalid inactive_days value for issue #{number}."
+            )
+
+        overrides[number] = inactive_days
+
+    return overrides
 
 class IssueSummary(BaseModel):
     number: int
@@ -80,6 +118,7 @@ async def list_issues(
     now = datetime.now(timezone.utc)
 
     summaries: list[IssueSummary] = []
+    demo_ages = _load_demo_ages(settings.demo_ages_file)
 
     for issue in github_issues:
         updated_at = issue.updated_at
@@ -87,9 +126,14 @@ async def list_issues(
         if updated_at.tzinfo is None:
             updated_at = updated_at.replace(tzinfo=timezone.utc)
 
-        inactive_days = max(
+        actual_inactive_days = max(
             0,
             (now - updated_at).days,
+        )
+
+        inactive_days = demo_ages.get(
+            issue.number,
+            actual_inactive_days,
         )
 
         summaries.append(

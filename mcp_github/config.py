@@ -1,7 +1,7 @@
 
 from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
+from pathlib import Path
 
 class GitHubSettings(BaseSettings):
     mcp_github_pat: SecretStr
@@ -10,7 +10,7 @@ class GitHubSettings(BaseSettings):
     github_api_url: str = "https://api.github.com"
     github_api_version: str = "2022-11-28"
     github_timeout: float = 20.0
-
+    demo_ages_file: Path = Path("demo-ages.json")
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
