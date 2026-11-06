@@ -137,6 +137,25 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Exposed GitHub tools through Streamable HTTP.
 - [x] Verified GitHub REST API authentication and read operations against the actual repository.
 - [x] Manually verified all four MCP tools using MCP Inspector.
+### Reconciliation (Initial Implementation)
+
+- [x] Added typed reconciliation evidence and result models.
+- [x] Implemented reconciliation outcome classification based on GitHub issue state and transaction-marker counts.
+- [x] Added validation to ensure reconciliation evidence matches the requested transaction, repository and issue.
+- [x] Implemented the reconciliation engine in `app/reconcile/engine.py`.
+- [x] Integrated the engine with `TransactionStore` for atomic reconciliation claims and state transitions.
+- [x] Added read-only GitHub activity probing through Otari's MCP execution API.
+- [x] Prioritized MCP `structuredContent` when parsing tool responses, with JSON text fallback.
+- [x] Preserved Otari Request IDs during reconciliation.
+- [x] Added handling for reconciliation probe failures and restoration of uncertain transaction states.
+- [x] Implemented the reconciliation API endpoint.
+
+**Pending:**
+- [ ] Complete integration with the transaction execution/dispatch workflow.
+- [ ] Automatically trigger reconciliation for recovered `INDETERMINATE` transactions.
+- [ ] Verify the complete lost-response scenario (`drop_after_apply` → `INDETERMINATE` → reconciliation → `SUCCEEDED`).
+- [ ] Verify crash recovery and reconciliation end to end.
+- [ ] Verify duplicate-marker and partial-execution scenarios.
 ## Running Locally
 
 ```bash
@@ -175,6 +194,11 @@ TrustRail/
 │   ├── main.py
 │   ├── core/
 │   │   └── config.py
+|   ├── api/
+|   │   │   ├── __init__.py
+|   │   │   └── routes/
+|   │   │       ├── __init__.py
+|   │   │       └── reconciliation.py
 │   ├── cli/
 │   │   ├── main.py
 │   │   └── commands/
@@ -209,6 +233,9 @@ TrustRail/
 │   │   └── store.py
 │   ├── agent/
 │   ├── reconcile/
+│   │   ├── models.py
+│   │   ├── classifier.py
+│   │   └── engine.py
 │   ├── scenarios/
 │   └── fakeotari/
 ├── mcp_github/

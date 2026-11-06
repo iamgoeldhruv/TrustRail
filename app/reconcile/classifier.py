@@ -1,7 +1,7 @@
 
 from app.reconcile.models import (
     IssueActivityEvidence,
-    ReconciliationResult,
+    ReconciliationOutcome,
 )
 from app.txn.states import TransactionState
 
@@ -9,40 +9,30 @@ from app.txn.states import TransactionState
 def classify_reconciliation(
     transaction_id: str,
     evidence: IssueActivityEvidence,
-) -> ReconciliationResult:
+) -> ReconciliationOutcome:
     """
-    Classify an uncertain transaction using authoritative GitHub evidence.
+    Classify the original write using read-only GitHub evidence.
 
-    This function performs no network calls and does not modify the database.
+    The marker comment identifies whether this particular transaction
+    applied its write. Issue closure alone is not sufficient evidence.
     """
 
     if evidence.txn_id != transaction_id:
         raise ValueError(
-            "GitHub evidence transaction ID does not match the transaction"
+            "Evidence transaction ID does not match requested transaction"
         )
 
+    # More than one matching marker means the write was duplicated.
     if evidence.marker_comment_count > 1:
-        outcome = TransactionState.DUPLICATE_DETECTED
-        reason = "Multiple GitHub comments contain the transaction marker"
+        return TransactionState.DUPLICATE_DETECTED
 
-    elif evidence.is_closed and evidence.marker_comment_count == 1:
-        outcome = TransactionState.SUCCEEDED
-        reason = "Issue is closed and exactly one transaction marker exists"
+    # Exactly one marker and a closed issue means the write completed.
+    if evidence.is_closed and evidence.marker_comment_count == 1:
+        return TransactionState.SUCCEEDED
 
-    elif not evidence.is_closed and evidence.marker_comment_count == 0:
-        outcome = TransactionState.NOT_EXECUTED
-        reason = "Issue is open and no transaction marker exists"
+    # No marker and an open issue means there is no evidence the write ran.
+    if not evidence.is_closed and evidence.marker_comment_count == 0:
+        return TransactionState.NOT_EXECUTED
 
-    else:
-        outcome = TransactionState.UNRESOLVED
-        reason = (
-            "GitHub issue state and transaction marker evidence "
-            "do not establish a definitive outcome"
-        )
-
-    return ReconciliationResult(
-        transaction_id=transaction_id,
-        outcome=outcome,
-        reason=reason,
-        evidence=evidence,
-    )
+    # All other combinations are ambiguous.
+    return TransactionState.UNRESOLVED

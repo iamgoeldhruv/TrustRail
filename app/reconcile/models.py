@@ -7,6 +7,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.txn.states import TransactionState
 
 
+ReconciliationOutcome = Literal[
+    TransactionState.SUCCEEDED,
+    TransactionState.NOT_EXECUTED,
+    TransactionState.UNRESOLVED,
+    TransactionState.DUPLICATE_DETECTED,
+]
+
+
 class IssueActivityEvidence(BaseModel):
     """Validated evidence retrieved from the GitHub MCP server."""
 
@@ -22,9 +30,11 @@ class IssueActivityEvidence(BaseModel):
     matching_comment_ids: list[int] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_evidence_consistency(self):
+    def validate_evidence_consistency(self) -> "IssueActivityEvidence":
         if self.is_closed != (self.issue_state == "closed"):
-            raise ValueError("Issue state and is_closed are inconsistent")
+            raise ValueError(
+                "Issue state and is_closed are inconsistent"
+            )
 
         if self.marker_comment_count != len(self.matching_comment_ids):
             raise ValueError(
@@ -36,8 +46,16 @@ class IssueActivityEvidence(BaseModel):
         ):
             raise ValueError("Duplicate comment IDs in evidence")
 
-        if any(comment_id <= 0 for comment_id in self.matching_comment_ids):
-            raise ValueError("Comment IDs must be positive")
+        if any(
+            isinstance(comment_id, bool)
+            or not isinstance(comment_id, int)
+            or comment_id <= 0
+            for comment_id in self.matching_comment_ids
+        ):
+            raise ValueError("Comment IDs must be positive integers")
+
+        if not self.repository.strip():
+            raise ValueError("Repository cannot be empty")
 
         return self
 
@@ -48,12 +66,7 @@ class ReconciliationResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     transaction_id: str
-    outcome: Literal[
-        TransactionState.SUCCEEDED,
-        TransactionState.NOT_EXECUTED,
-        TransactionState.UNRESOLVED,
-        TransactionState.DUPLICATE_DETECTED,
-    ]
+    outcome: ReconciliationOutcome
     reason: str
     evidence: IssueActivityEvidence
     reconciled_at: datetime = Field(

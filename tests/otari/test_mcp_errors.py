@@ -12,7 +12,8 @@ from app.otari.exceptions import (
 )
 
 from app.otari.mcp import OtariMCPClient
-from counting_transport import CountingTransport
+from tests.otari.counting_transport import CountingTransport
+
 
 
 def make_error_response(
