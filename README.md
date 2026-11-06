@@ -107,6 +107,18 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Integrated ledger events with dispatch claiming and startup recovery.
 - [x] Added tests for chain integrity, tampering, append-only enforcement and transaction-ledger atomicity.
 
+### Execution Outcome Classification
+
+- [x] Implemented a centralized execution outcome classifier in `app/txn/outcome_classifier.py`.
+- [x] Added classification of successful MCP execution responses (`isError: false`) as `SUCCEEDED`.
+- [x] Added classification of definitive MCP tool errors (`isError: true`) as `FAILED`.
+- [x] Added classification of Otari `not_started` errors as `FAILED_SAFE`.
+- [x] Added classification of Otari `outcome_unknown` errors as `INDETERMINATE`.
+- [x] Added classification of stale MCP server revision errors (`mcp_server_changed`) as `APPROVAL_INVALIDATED`.
+- [x] Added validation for unsupported outcome types.
+- [x] Added parameterized unit tests covering all five execution outcome categories and unsupported inputs.
+- [x] Verified all outcome classifier tests pass.
+
 ## Running Locally
 
 ```bash
@@ -170,6 +182,7 @@ TrustRail/
 │   │   ├── transitions.py
 │   │   ├── models.py
 │   │   └── store.py
+│   |   └── outcome_classifier.py
 │   ├── approvals/
 │   ├── ledger/
 │   │   ├── models.py
