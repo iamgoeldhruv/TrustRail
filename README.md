@@ -129,6 +129,7 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Implemented paginated GitHub API requests.
 - [x] Added GitHub response models for issues, labels, users and comments.
 - [x] Implemented `list_issues` MCP tool to retrieve repository issues, filter pull requests and calculate inactivity duration.
+- [x] Added configurable `demo-ages.json` overrides for deterministic inactivity values during demonstrations, with actual GitHub timestamps as fallback.
 - [x] Implemented `get_issue` MCP tool to retrieve complete issue details.
 - [x] Implemented `get_issue_activity` MCP tool to inspect issue state, comments and TrustRail transaction markers.
 - [x] Implemented `close_issue_with_note` MCP tool to post transaction-marked comments and close GitHub issues.
@@ -157,6 +158,19 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [ ] Verify the complete lost-response scenario (`drop_after_apply` → `INDETERMINATE` → reconciliation → `SUCCEEDED`).
 - [ ] Verify crash recovery and reconciliation end to end.
 - [ ] Verify duplicate-marker and partial-execution scenarios.
+### Demo Inactivity Overrides
+
+The GitHub MCP server supports configurable inactivity-day overrides
+through `demo-ages.json` for deterministic demonstrations.
+
+Example:
+
+```json
+{
+  "1": 45,
+  "2": 60,
+  "3": 12
+}
 ## Running Locally
 
 ```bash
@@ -265,6 +279,7 @@ TrustRail/
 │   ├── execute_otari_mcp.py
 │   └── smoke_github.py
 ├── docs/
+├── demo-ages.json
 ├── Dockerfile
 ├── requirements.txt
 ├── pyproject.toml

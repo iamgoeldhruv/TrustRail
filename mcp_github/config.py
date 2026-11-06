@@ -6,6 +6,7 @@ from pathlib import Path
 class GitHubSettings(BaseSettings):
     mcp_github_pat: SecretStr
     mcp_github_repo: str
+    trustrail_admin_token: SecretStr
 
     github_api_url: str = "https://api.github.com"
     github_api_version: str = "2022-11-28"

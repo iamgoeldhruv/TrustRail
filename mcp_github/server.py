@@ -1,4 +1,5 @@
 
+import asyncio
 import logging
 import os
 import re 
@@ -14,8 +15,30 @@ from datetime import datetime, timezone
 from mcp.server.transport_security import TransportSecuritySettings
 import json
 from pathlib import Path
-logger = logging.getLogger("trustrail.mcp.github")
+from mcp_github.middleware import DropResponseMiddleware
+import hmac
 
+from pydantic import ValidationError
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
+
+from mcp_github.admin_models import (
+    FaultUpdateRequest,
+    FaultUpdateResponse,
+)
+from mcp_github.fault_injection import fault_controller
+logger = logging.getLogger("trustrail.mcp.github")
+from mcp_github.fault_injection import (
+    FaultMode,
+    fault_controller,
+)
+from mcp_github.fault_injection import (
+    FaultMode,
+    fault_controller,
+    mark_response_for_drop,
+)
 mcp = MCPServer("TrustRail-GitHub")
 
 def _load_demo_ages(path: Path) -> dict[int, int]:
@@ -322,16 +345,30 @@ async def close_issue_with_note(
 
         # 3. Create the transaction-marked comment.
         # Do not retry this POST.
+        fault_mode = await fault_controller.consume_mode()
+        logger.info(
+            "Consumed fault mode %s for issue #%s",
+            fault_mode.value,
+            issue_number,
+        )
+        if fault_mode == FaultMode.FAIL_BEFORE_APPLY:
+            raise RuntimeError("Injected failure before GitHub write.")
         comment = await client.create_issue_comment(
             issue_number=issue_number,
             body=comment_body,
         )
 
+        if fault_mode == FaultMode.PARTIAL:
+            raise RuntimeError("Injected failure after comment creation.")
         # 4. Close the issue.
         # If this request fails or its response is lost, the comment
         # remains as evidence for TrustRail reconciliation.
         # Do not retry this PATCH.
         closed_issue = await client.close_issue(issue_number)
+        if fault_mode == FaultMode.DROP_AFTER_APPLY:
+            mark_response_for_drop()
+        if fault_mode == FaultMode.DELAY_AFTER_APPLY:
+            await asyncio.sleep(50)
 
     logger.info(
         "Issue #%s closed for transaction %s",
@@ -349,6 +386,49 @@ async def close_issue_with_note(
         comment_id=comment.id,
         comment_url=comment.html_url,
     )
+async def update_fault_mode(request: Request) -> JSONResponse:
+    settings = GitHubSettings()
+
+    authorization = request.headers.get("Authorization", "")
+
+    if not authorization.startswith("Bearer "):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Invalid or missing admin token."},
+        )
+
+    provided_token = authorization.removeprefix("Bearer ").strip()
+    expected_token = settings.trustrail_admin_token.get_secret_value()
+
+    if not hmac.compare_digest(provided_token, expected_token):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Invalid or missing admin token."},
+        )
+
+    try:
+        payload = await request.json()
+        fault_request = FaultUpdateRequest.model_validate(payload)
+
+    except (ValueError, ValidationError):
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "Invalid fault configuration."},
+        )
+
+    await fault_controller.set_mode(fault_request.mode)
+
+    response = FaultUpdateResponse(
+        mode=fault_request.mode,
+        updated=True,
+    )
+
+    logger.info("Admin updated fault mode to %s", fault_request.mode.value)
+
+    return JSONResponse(
+        status_code=200,
+        content=response.model_dump(mode="json"),
+    )
 def create_mcp_app():
     railway_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN")
 
@@ -361,12 +441,24 @@ def create_mcp_app():
             ],
         )
     else:
-        # Keep the SDK's default localhost protection in development.
         security_settings = None
 
-    return mcp.streamable_http_app(
-        json_response=True,
-        transport_security=security_settings,
+    mcp_app = mcp.streamable_http_app(
+    json_response=True,
+    transport_security=security_settings,
+    )
+
+    mcp_app = DropResponseMiddleware(mcp_app)
+
+    return Starlette(
+        routes=[
+            Route(
+                "/admin/fault",
+                endpoint=update_fault_mode,
+                methods=["POST"],
+            ),
+            Mount("/", app=mcp_app),
+        ]
     )
 
 
