@@ -61,3 +61,8 @@ class Policy(StrictModel):
     limits: LimitsPolicy
 
     audit: AuditPolicy
+
+
+class CompiledPolicyResponse(StrictModel):
+    policy: Policy
+    summary: str

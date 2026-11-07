@@ -319,6 +319,11 @@ The complete generated file contains inactivity overrides for all 10 seeded issu
 - [x] Added a real Otari integration script at `scripts/test_policy_compiler.py`; it exercises clear, ambiguous and adversarial policy requests without performing GitHub writes.
 
 - [x] Verified all three integration scenarios using `deepseek/deepseek-v4-pro-0813`: clear policy extraction, clarification for an underspecified request, and rejection of an attempted schema override while retaining the legitimate policy instructions.
+- [x] Added deterministic plain-English policy summary generation using Python, based exclusively on the final validated `Policy`.
+- [x] Integrated policy summary generation into `PolicyCompiler`.
+- [x] Added a structured compiler response containing both the validated policy and its generated summary.
+- [x] Extended real Otari integration tests to verify summary accuracy for clear and adversarial policy requests.
+- [x] Verified all three compiler scenarios (clear, ambiguous and adversarial), with summary validation passing for successful compilations.
 
 The transaction was independently verified against GitHub and its corresponding database records and audit ledger.
 
@@ -474,6 +479,7 @@ TrustRail/
 │   └── verify_github_write.py
 │   ├── demo_real_write.py
 │   ├── verify_transaction_ledger.py
+│   ├── test_policy_compiler.py
 ├── docs/
 ├── demo-ages.json
 ├── Dockerfile

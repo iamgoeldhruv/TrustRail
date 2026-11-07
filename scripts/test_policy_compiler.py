@@ -6,8 +6,10 @@ from dataclasses import dataclass
 
 from app.otari.client import OtariClient
 from app.policy.compiler import PolicyCompiler
-from app.policy.compiler_models import AmbiguousResponse
-from app.policy.models import Policy
+from app.policy.compiler_models import (
+    AmbiguousResponse,
+)
+from app.policy.models import CompiledPolicyResponse, Policy
 
 
 @dataclass
@@ -95,6 +97,74 @@ def verify_policy(policy: Policy, case: TestCase) -> list[str]:
     return errors
 
 
+def verify_summary(
+    result: CompiledPolicyResponse,
+    case: TestCase,
+) -> list[str]:
+    errors = []
+
+    summary = result.summary
+    policy = result.policy
+
+    if not summary.strip():
+        errors.append("Generated summary is empty.")
+        return errors
+
+    if policy.repo not in summary:
+        errors.append("Summary does not contain the policy repository.")
+
+    if policy.actions.close_issue.allowed:
+        if "Closing issues is enabled." not in summary:
+            errors.append("Summary does not correctly describe issue closing.")
+    else:
+        if "Closing issues is disabled." not in summary:
+            errors.append("Summary does not correctly describe disabled closing.")
+
+    conditions = policy.actions.close_issue.conditions
+
+    if conditions is not None:
+        expected_inactivity = (
+            f"{conditions.inactive_days_gte} days"
+        )
+        if expected_inactivity not in summary:
+            errors.append("Summary does not contain the inactivity threshold.")
+
+        for priority in conditions.priority_not_in:
+            if priority not in summary:
+                errors.append(
+                    f"Summary does not contain excluded priority {priority}."
+                )
+
+        if conditions.require_priority_label:
+            if "Issues must have a priority label." not in summary:
+                errors.append("Summary incorrectly describes priority label requirement.")
+        else:
+            if "A priority label is not required." not in summary:
+                errors.append("Summary incorrectly describes priority label requirement.")
+
+    if policy.actions.close_issue.requires_approval:
+        if "Human approval is required before closing." not in summary:
+            errors.append("Summary incorrectly describes approval requirement.")
+    else:
+        if "Human approval is not required before closing." not in summary:
+            errors.append("Summary incorrectly describes approval requirement.")
+
+    expected_limit = (
+        f"Maximum actions per run: {policy.limits.max_actions_per_run}."
+    )
+    if expected_limit not in summary:
+        errors.append("Summary does not contain the action limit.")
+
+    expected_audit = (
+        f"Audit logging: "
+        f"{'enabled' if policy.audit.enabled else 'disabled'}."
+    )
+    if expected_audit not in summary:
+        errors.append("Summary does not correctly describe audit logging.")
+
+    return errors
+
+
 async def run_case(
     compiler: PolicyCompiler,
     case: TestCase,
@@ -118,31 +188,62 @@ async def run_case(
                 return False
 
             print("PASS: Model correctly identified ambiguity.")
+
             for question in result.questions:
                 print(f"  - {question}")
 
             return True
 
-        if not isinstance(result, Policy):
-            print("FAIL: Expected a Policy object.")
+        if not isinstance(result, CompiledPolicyResponse):
+            print("FAIL: Expected a CompiledPolicyResponse.")
             print(f"Received: {type(result).__name__}")
+
             if isinstance(result, AmbiguousResponse):
                 print(f"Questions: {result.questions}")
+
             return False
 
-        errors = verify_policy(result, case)
+        policy = result.policy
 
-        if errors:
+        policy_errors = verify_policy(policy, case)
+
+        if policy_errors:
             print("FAIL: Policy validation mismatches:")
-            for error in errors:
+
+            for error in policy_errors:
                 print(f"  - {error}")
+
+            return False
+
+        summary_errors = verify_summary(result, case)
+
+        if summary_errors:
+            print("FAIL: Summary validation mismatches:")
+
+            for error in summary_errors:
+                print(f"  - {error}")
+
             return False
 
         print("PASS: Policy generated and semantic checks passed.")
-        print(f"Repository: {result.repo}")
-        print(f"Inactive days: {result.actions.close_issue.conditions.inactive_days_gte}")
-        print(f"Excluded priorities: {result.actions.close_issue.conditions.priority_not_in}")
-        print(f"Requires approval: {result.actions.close_issue.requires_approval}")
+        print(f"Repository: {policy.repo}")
+        print(
+            "Inactive days: "
+            f"{policy.actions.close_issue.conditions.inactive_days_gte}"
+        )
+        print(
+            "Excluded priorities: "
+            f"{policy.actions.close_issue.conditions.priority_not_in}"
+        )
+        print(
+            "Requires approval: "
+            f"{policy.actions.close_issue.requires_approval}"
+        )
+
+        print("\nGenerated policy summary:")
+        print(result.summary)
+
+        print("\nPASS: Summary accurately reflects the validated policy.")
 
         return True
 
@@ -155,11 +256,13 @@ async def main():
     parser = argparse.ArgumentParser(
         description="Test the real TrustRail Policy Compiler through Otari."
     )
+
     parser.add_argument(
         "--model",
         required=True,
         help="Model identifier available through Otari.",
     )
+
     parser.add_argument(
         "--case",
         action="append",
@@ -197,6 +300,7 @@ async def main():
         print(f"{name}: {'PASS' if passed else 'FAIL'}")
 
     passed_count = sum(passed for _, passed in results)
+
     print(f"\nPassed: {passed_count}/{len(results)}")
 
     if passed_count == len(results):

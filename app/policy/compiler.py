@@ -1,10 +1,13 @@
 from app.otari.client import OtariClient
-from app.policy.compiler_models import AmbiguousResponse
+from app.policy.compiler_models import (
+    AmbiguousResponse
+)
 from app.policy.compiler_parser import parse_compiler_response
 from app.policy.compiler_validation import get_missing_policy_fields
 from app.policy.compiler_builder import build_policy
-from app.policy.models import Policy
+from app.policy.models import CompiledPolicyResponse, Policy
 from app.policy.prompts import SYSTEM_PROMPT
+from app.policy.summary import generate_policy_summary
 
 
 class PolicyCompiler:
@@ -19,7 +22,7 @@ class PolicyCompiler:
     async def compile(
         self,
         user_request: str,
-    ) -> Policy | AmbiguousResponse:
+    ) -> CompiledPolicyResponse | AmbiguousResponse:
 
         if not user_request.strip():
             raise ValueError("Policy request cannot be empty.")
@@ -50,7 +53,16 @@ class PolicyCompiler:
         if missing_fields:
             return self._build_ambiguity_response(missing_fields)
 
-        return build_policy(parsed)
+        # Build the final validated policy deterministically.
+        policy = build_policy(parsed)
+
+        # Generate the summary exclusively from the final Policy.
+        summary = generate_policy_summary(policy)
+
+        return CompiledPolicyResponse(
+            policy=policy,
+            summary=summary,
+        )
 
     @staticmethod
     def _build_ambiguity_response(
