@@ -160,17 +160,55 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [ ] Verify duplicate-marker and partial-execution scenarios.
 ### Demo Inactivity Overrides
 
-The GitHub MCP server supports configurable inactivity-day overrides
-through `demo-ages.json` for deterministic demonstrations.
+### Demo Inactivity Overrides
 
-Example:
+The GitHub MCP server supports configurable inactivity-day overrides through `demo-ages.json` for deterministic demonstrations.
+
+- [x] Added automatic generation of `demo-ages.json` through `scripts/seed_sandbox.py`.
+- [x] Mapped actual GitHub issue numbers to their configured inactivity durations.
+- [x] Preserved actual GitHub timestamps as the fallback when an issue has no configured override.
+
+The generated JSON follows this structure:
 
 ```json
 {
-  "1": 45,
-  "2": 60,
-  "3": 12
+  "<actual_github_issue_number_1>": 45,
+  "<actual_github_issue_number_2>": 60,
+  "<actual_github_issue_number_3>": 12
 }
+```
+
+The complete generated file contains inactivity overrides for all 10 seeded issues.
+### Fault Injection & Admin Control
+
+- [x] Implemented configurable fault modes using a dedicated `FaultMode` enum:
+  - `none`: Normal GitHub write execution.
+  - `fail_before_apply`: Injects a failure before any GitHub write.
+  - `partial`: Creates the transaction-marked comment but fails before closing the issue.
+  - `drop_after_apply`: Applies the GitHub write but deliberately drops the MCP HTTP response.
+  - `delay_after_apply`: Delays the response after the GitHub write has been applied.
+- [x] Implemented a thread-safe, asynchronous `FaultController` with one-shot fault consumption.
+- [x] Added an authenticated `POST /admin/fault` endpoint to configure fault-injection modes.
+- [x] Protected the admin endpoint using Bearer-token authentication with constant-time token comparison.
+- [x] Added request-scoped response-drop handling using Python `ContextVar` to isolate concurrent MCP requests.
+- [x] Implemented ASGI middleware to buffer and deliberately drop MCP HTTP responses for the `drop_after_apply` scenario.
+- [x] Kept the admin endpoint separate from MCP tool discovery and execution.
+- [x] Verified admin endpoint authentication and fault-mode configuration.
+- [x] Verified transaction-marker creation and retrieval through GitHub issue activity.
+### GitHub Sandbox Seeding
+
+- [x] Extended `GitHubClient` with `list_labels()` to retrieve repository labels.
+- [x] Added `create_label()` to create repository labels with validated names and hexadecimal colors.
+- [x] Added `create_issue()` to create GitHub issues with titles, descriptions and labels.
+- [x] Implemented `scripts/seed_sandbox.py` to populate the configured GitHub sandbox repository.
+- [x] Defined a deterministic dataset of 10 software-engineering issues.
+- [x] Created the required priority labels (`P0`, `P1`, `P2`, `P3`).
+- [x] Added realistic issue titles and descriptions for all seeded issues.
+- [x] Included a prompt-injection example in issue #9 to test resistance to untrusted issue content.
+- [x] Left issue #10 without a priority label to test fail-closed authorization.
+- [x] Added unique seed markers to identify previously created issues and prevent duplicate creation on reruns.
+- [x] Generated `demo-ages.json` using actual GitHub issue numbers and their configured inactivity-day overrides.
+- [x] Successfully executed the seeding script against the configured GitHub repository.
 ## Running Locally
 
 ```bash
@@ -260,6 +298,9 @@ TrustRail/
 │   ├── models.py
 │   ├── client.py
 │   └── server.py
+|   ├── fault_injection.py
+|   ├── middleware.py
+|   └── admin_models.py
 ├── mcp_spike/
 │   └── server.py
 ├── tests/
@@ -277,7 +318,8 @@ TrustRail/
 ├── scripts/
 │   ├── discover_otari_mcp.py
 │   ├── execute_otari_mcp.py
-│   └── smoke_github.py
+│   ├── smoke_github.py
+│   └── seed_sandbox.py
 ├── docs/
 ├── demo-ages.json
 ├── Dockerfile

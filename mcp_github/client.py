@@ -12,7 +12,7 @@ from mcp_github.errors import (
 )
 from mcp_github.models import GitHubComment, GitHubIssue
 
-
+from mcp_github.models import GitHubComment, GitHubIssue, GitHubLabel
 class GitHubClient:
     def __init__(
         self,
@@ -238,3 +238,76 @@ class GitHubClient:
             raise ValueError(
                 "Issue number must be a positive integer"
             )
+
+    async def list_labels(self) -> list[GitHubLabel]:
+        """Retrieve all labels from the configured repository."""
+
+        data = await self._get_paginated(
+            f"{self._repo_path}/labels",
+        )
+
+        return [
+            GitHubLabel.model_validate(label)
+            for label in data
+        ]
+
+    async def create_label(
+        self,
+        name: str,
+        color: str,
+        description: str = "",
+    ) -> GitHubLabel:
+        """Create a label in the configured repository."""
+
+        name = name.strip()
+        color = color.strip().lstrip("#")
+
+        if not name:
+            raise ValueError("Label name cannot be empty.")
+
+        if len(color) != 6 or any(
+            char not in "0123456789abcdefABCDEF"
+            for char in color
+        ):
+            raise ValueError(
+                "Label color must be a 6-character hex value."
+            )
+
+        data = await self._request(
+            "POST",
+            f"{self._repo_path}/labels",
+            json={
+                "name": name,
+                "color": color,
+                "description": description,
+            },
+        )
+
+        return GitHubLabel.model_validate(data)
+
+    async def create_issue(
+        self,
+        title: str,
+        body: str,
+        labels: list[str] | None = None,
+    ) -> GitHubIssue:
+        """Create an issue in the configured repository."""
+
+        title = title.strip()
+
+        if not title:
+            raise ValueError("Issue title cannot be empty.")
+
+        data = await self._request(
+            "POST",
+            f"{self._repo_path}/issues",
+            json={
+                "title": title,
+                "body": body,
+                "labels": labels or [],
+            },
+        )
+
+        return GitHubIssue.model_validate(data)
+
+    
