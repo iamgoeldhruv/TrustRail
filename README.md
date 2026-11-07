@@ -302,6 +302,24 @@ The complete generated file contains inactivity overrides for all 10 seeded issu
 **GitHub matching comment ID:**
 `6710349235`
 
+### Natural-Language Policy Compiler
+
+- [x] Added a compiler system prompt requiring JSON-only output and the fixed `PolicyDraft` schema.
+
+- [x] Defined the supported compiler response shapes: a policy draft or an `ambiguous` response containing clarification questions.
+
+- [x] Added strict compiler-response parsing and Pydantic schema validation; unexpected fields and malformed responses are rejected rather than repaired.
+
+- [x] Added policy-draft completeness validation so missing security-relevant values are not silently guessed.
+
+- [x] Added deterministic policy construction in Python, supplying system-controlled fields such as repository, schema version, action limits and audit configuration.
+
+- [x] Integrated the compiler with the asynchronous Otari chat-completions client.
+
+- [x] Added a real Otari integration script at `scripts/test_policy_compiler.py`; it exercises clear, ambiguous and adversarial policy requests without performing GitHub writes.
+
+- [x] Verified all three integration scenarios using `deepseek/deepseek-v4-pro-0813`: clear policy extraction, clarification for an underspecified request, and rejection of an attempted schema override while retaining the legitimate policy instructions.
+
 The transaction was independently verified against GitHub and its corresponding database records and audit ledger.
 
 Note: This verifies the successful execution path. It does not establish a universal exactly-once execution guarantee.
@@ -380,10 +398,20 @@ TrustRail/
 │   │   ├── models.py
 │   │   ├── parser.py
 │   │   └── validator.py
+│   │   └── compiler_builder.py
+│   │   └── compiler_models.py
+│   │   └── compiler_parser.py
+│   │   └── compiler_validation.py
+│   │   └── compiler.py
+│   │   └── prompts.py
+│   │   └── summary.py
+│   │   └── validator.py
 │   ├── authz/
 │   │   ├── models.py
 │   │   └── engine.py
 │   ├── facts/
+│   │   ├── github.py
+│   │   └── models.py
 │   ├── db/
 │   │   ├── connection.py
 │   │   └── migrations.py

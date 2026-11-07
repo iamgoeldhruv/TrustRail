@@ -10,14 +10,34 @@ from app.policy.compiler_models import (
 
 class CompilerResponseError(ValueError):
     """Raised when the LLM returns an invalid compiler response."""
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
 
+    for key, value in pairs:
+        if key in result:
+            raise CompilerResponseError(
+                f"Compiler returned duplicate JSON key: {key}"
+            )
+        result[key] = value
+
+    return result
+
+
+def _reject_nonstandard_constant(value: str) -> None:
+    raise CompilerResponseError(
+        f"Compiler returned non-standard JSON constant: {value}"
+    )
 
 def parse_compiler_response(
     raw_response: str,
 ) -> PolicyDraft | AmbiguousResponse:
 
     try:
-        data = json.loads(raw_response)
+        data = json.loads(
+            raw_response,
+            object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=_reject_nonstandard_constant,
+        )
     except json.JSONDecodeError as exc:
         raise CompilerResponseError(
             "Compiler returned invalid JSON."
