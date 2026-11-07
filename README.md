@@ -139,6 +139,8 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Verified GitHub REST API authentication and read operations against the actual repository.
 - [x] Manually verified all four MCP tools using MCP Inspector.
 - [x] Implemented `get_issue_activity` to inspect issue state, comments and transaction marker occurrences for reconciliation.
+- [x] Implemented `reopen_issue()` to reopen GitHub issues.
+- [x] Implemented `delete_issue_comment()` to delete specific issue comments.
 ### Reconciliation (Initial Implementation)
 
 - [x] Added typed reconciliation evidence and result models.
@@ -209,6 +211,20 @@ The complete generated file contains inactivity overrides for all 10 seeded issu
 - [x] Added unique seed markers to identify previously created issues and prevent duplicate creation on reruns.
 - [x] Generated `demo-ages.json` using actual GitHub issue numbers and their configured inactivity-day overrides.
 - [x] Successfully executed the seeding script against the configured GitHub repository.
+### Demo Environment Reset
+
+- [x] Added `reopen_issue()` to `GitHubClient` to reopen previously closed GitHub issues.
+- [x] Added `delete_issue_comment()` to remove specific GitHub issue comments.
+- [x] Implemented `scripts/demo_reset.py` to restore the GitHub sandbox to a clean demonstration state.
+- [x] Identified seeded issues using their unique `trustrail-seed` markers.
+- [x] Added validation to detect missing or duplicate seeded issues before resetting.
+- [x] Reopened all closed seeded issues while leaving already-open issues unchanged.
+- [x] Removed only TrustRail transaction-marked comments, preserving ordinary comments and seed markers.
+- [x] Restored `demo-ages.json` using actual GitHub issue numbers and configured inactivity values.
+- [x] Reset the GitHub MCP server fault-injection mode to `none` through the authenticated admin endpoint.
+- [x] Added post-reset verification to ensure all seeded issues are open and transaction comments have been removed.
+- [x] Made the reset operation idempotent so it can be safely executed multiple times.
+
 ## Running Locally
 
 ```bash
@@ -320,6 +336,7 @@ TrustRail/
 │   ├── execute_otari_mcp.py
 │   ├── smoke_github.py
 │   └── seed_sandbox.py
+│   └── demo_reset.py
 ├── docs/
 ├── demo-ages.json
 ├── Dockerfile

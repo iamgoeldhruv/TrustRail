@@ -7,7 +7,7 @@ from pydantic import SecretStr
 
 from mcp_github.client import GitHubClient
 from mcp_github.config import GitHubSettings
-from mcp_github.errors import GitHubNotFoundError
+from mcp_github.errors import GitHubConnectionError, GitHubNotFoundError
 
 
 @pytest.fixture
@@ -194,5 +194,48 @@ async def test_authentication_header(github_settings):
 
     try:
         await client.list_issues()
+    finally:
+        await http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_safe_get_retries_transient_connection_error(github_settings):
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+
+        if attempts == 1:
+            raise httpx.RemoteProtocolError(
+                "Server disconnected without sending a response"
+            )
+
+        return httpx.Response(200, json=[])
+
+    client, http_client = create_client(github_settings, handler)
+
+    try:
+        assert await client.list_issues() == []
+        assert attempts == 2
+    finally:
+        await http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_write_does_not_retry_connection_error(github_settings):
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        raise httpx.RemoteProtocolError("connection dropped")
+
+    client, http_client = create_client(github_settings, handler)
+
+    try:
+        with pytest.raises(GitHubConnectionError):
+            await client.close_issue(1)
+        assert attempts == 1
     finally:
         await http_client.aclose()

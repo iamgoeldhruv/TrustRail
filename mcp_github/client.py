@@ -1,4 +1,4 @@
-
+import asyncio
 from typing import Any
 
 import httpx
@@ -10,10 +10,13 @@ from mcp_github.errors import (
     GitHubConnectionError,
     GitHubNotFoundError,
 )
-from mcp_github.models import GitHubComment, GitHubIssue
-
 from mcp_github.models import GitHubComment, GitHubIssue, GitHubLabel
+
+
 class GitHubClient:
+    _SAFE_REQUEST_ATTEMPTS = 3
+    _SAFE_REQUEST_BACKOFF_SECONDS = 0.25
+
     def __init__(
         self,
         settings: GitHubSettings,
@@ -26,9 +29,7 @@ class GitHubClient:
             base_url=settings.github_api_url,
             headers={
                 "Accept": "application/vnd.github+json",
-                "Authorization": (
-                    f"Bearer {settings.mcp_github_pat.get_secret_value()}"
-                ),
+                "Authorization": (f"Bearer {settings.mcp_github_pat.get_secret_value()}"),
                 "X-GitHub-Api-Version": settings.github_api_version,
             },
             timeout=settings.github_timeout,
@@ -37,17 +38,12 @@ class GitHubClient:
         self._client.headers.update(
             {
                 "Accept": "application/vnd.github+json",
-                "Authorization": (
-                    f"Bearer {self.settings.mcp_github_pat.get_secret_value()}"
-                ),
+                "Authorization": (f"Bearer {self.settings.mcp_github_pat.get_secret_value()}"),
                 "X-GitHub-Api-Version": settings.github_api_version,
             }
         )
 
-        self._repo_path = (
-            f"/repos/{settings.repository_owner}/"
-            f"{settings.repository_name}"
-        )
+        self._repo_path = f"/repos/{settings.repository_owner}/{settings.repository_name}"
 
     async def __aenter__(self) -> "GitHubClient":
         return self
@@ -70,22 +66,32 @@ class GitHubClient:
         endpoint: str,
         **kwargs: Any,
     ) -> Any:
-        try:
-            response = await self._client.request(
-                method,
-                endpoint,
-                **kwargs,
+        attempts = self._SAFE_REQUEST_ATTEMPTS if method.upper() == "GET" else 1
+
+        for attempt in range(attempts):
+            try:
+                response = await self._client.request(
+                    method,
+                    endpoint,
+                    **kwargs,
+                )
+                break
+
+            except httpx.TimeoutException as exc:
+                if attempt + 1 == attempts:
+                    raise GitHubConnectionError(
+                        "GitHub API request timed out"
+                    ) from exc
+
+            except httpx.RequestError as exc:
+                if attempt + 1 == attempts:
+                    raise GitHubConnectionError(
+                        f"GitHub API connection failed: {exc}"
+                    ) from exc
+
+            await asyncio.sleep(
+                self._SAFE_REQUEST_BACKOFF_SECONDS * (attempt + 1)
             )
-
-        except httpx.TimeoutException as exc:
-            raise GitHubConnectionError(
-                "GitHub API request timed out"
-            ) from exc
-
-        except httpx.RequestError as exc:
-            raise GitHubConnectionError(
-                f"GitHub API connection failed: {exc}"
-            ) from exc
 
         if response.is_success:
             if response.status_code == 204 or not response.content:
@@ -169,11 +175,7 @@ class GitHubClient:
             params=params,
         )
 
-        return [
-            GitHubIssue.model_validate(issue)
-            for issue in data
-            if "pull_request" not in issue
-        ]
+        return [GitHubIssue.model_validate(issue) for issue in data if "pull_request" not in issue]
 
     async def get_issue(
         self,
@@ -198,10 +200,7 @@ class GitHubClient:
             f"{self._repo_path}/issues/{issue_number}/comments",
         )
 
-        return [
-            GitHubComment.model_validate(comment)
-            for comment in data
-        ]
+        return [GitHubComment.model_validate(comment) for comment in data]
 
     async def create_issue_comment(
         self,
@@ -235,9 +234,7 @@ class GitHubClient:
     @staticmethod
     def _validate_issue_number(issue_number: int) -> None:
         if issue_number <= 0:
-            raise ValueError(
-                "Issue number must be a positive integer"
-            )
+            raise ValueError("Issue number must be a positive integer")
 
     async def list_labels(self) -> list[GitHubLabel]:
         """Retrieve all labels from the configured repository."""
@@ -246,10 +243,7 @@ class GitHubClient:
             f"{self._repo_path}/labels",
         )
 
-        return [
-            GitHubLabel.model_validate(label)
-            for label in data
-        ]
+        return [GitHubLabel.model_validate(label) for label in data]
 
     async def create_label(
         self,
@@ -265,13 +259,8 @@ class GitHubClient:
         if not name:
             raise ValueError("Label name cannot be empty.")
 
-        if len(color) != 6 or any(
-            char not in "0123456789abcdefABCDEF"
-            for char in color
-        ):
-            raise ValueError(
-                "Label color must be a 6-character hex value."
-            )
+        if len(color) != 6 or any(char not in "0123456789abcdefABCDEF" for char in color):
+            raise ValueError("Label color must be a 6-character hex value.")
 
         data = await self._request(
             "POST",
@@ -310,4 +299,35 @@ class GitHubClient:
 
         return GitHubIssue.model_validate(data)
 
-    
+    async def reopen_issue(
+        self,
+        issue_number: int,
+    ) -> GitHubIssue:
+        """Reopen a previously closed GitHub issue."""
+
+        self._validate_issue_number(issue_number)
+
+        data = await self._request(
+            "PATCH",
+            f"{self._repo_path}/issues/{issue_number}",
+            json={"state": "open"},
+        )
+
+        return GitHubIssue.model_validate(data)
+
+    async def delete_issue_comment(
+        self,
+        issue_number: int,
+        comment_id: int,
+    ) -> None:
+        """Delete a specific comment from a GitHub issue."""
+
+        self._validate_issue_number(issue_number)
+
+        if comment_id <= 0:
+            raise ValueError("Comment ID must be a positive integer")
+
+        await self._request(
+            "DELETE",
+            f"{self._repo_path}/issues/comments/{comment_id}",
+        )
