@@ -15,7 +15,11 @@ from app.txn.exceptions import TransactionNotFoundError
 from app.txn.models import Transaction, TransactionCreate
 from app.txn.states import TransactionState
 from app.txn.transitions import transition
-
+from app.txn.exceptions import (
+    ApprovalAlreadyAttachedError,
+    InvalidTransitionError,
+    TransactionNotFoundError,
+)
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
@@ -248,6 +252,99 @@ class TransactionStore:
             rows = connection.execute(query, parameters).fetchall()
 
         return [_row_to_transaction(row) for row in rows]
+
+    def record_otari_request_id(
+        self,
+        transaction_id: UUID | str,
+        request_id: str | None,
+    ) -> None:
+        """Persist an Otari request ID without changing transaction state."""
+        if not request_id:
+            return
+
+        transaction_id = str(transaction_id)
+        with get_connection(self.db_path) as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT * FROM transactions WHERE id = ?",
+                    (transaction_id,),
+                ).fetchone()
+                if row is None:
+                    raise TransactionNotFoundError(transaction_id)
+
+                connection.execute(
+                    """
+                    UPDATE transactions
+                    SET otari_request_ids_json = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        _append_request_id_json(row, request_id),
+                        _utc_now().isoformat(),
+                        transaction_id,
+                    ),
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+
+    def attach_approval(
+    self,
+    transaction_id: UUID | str,
+    approval_id: str,
+) -> None:
+        """Attach an approval once; repeated attachment of the same ID is safe."""
+        transaction_id = str(transaction_id)
+
+        if not approval_id or not approval_id.strip():
+            raise ValueError("approval_id must not be empty")
+
+        with get_connection(self.db_path) as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+
+                row = connection.execute(
+                    """
+                    SELECT approval_id
+                    FROM transactions
+                    WHERE id = ?
+                    """,
+                    (transaction_id,),
+                ).fetchone()
+
+                if row is None:
+                    raise TransactionNotFoundError(transaction_id)
+
+                existing_approval_id = row["approval_id"]
+
+                if existing_approval_id == approval_id:
+                    connection.commit()
+                    return
+
+                if existing_approval_id is not None:
+                    raise ApprovalAlreadyAttachedError(
+                        transaction_id=transaction_id,
+                        existing_approval_id=existing_approval_id,
+                        attempted_approval_id=approval_id,
+                    )
+
+                connection.execute(
+                    """
+                    UPDATE transactions
+                    SET approval_id = ?, updated_at = ?
+                    WHERE id = ?
+                    AND approval_id IS NULL
+                    """,
+                    (approval_id, _utc_now().isoformat(), transaction_id),
+                )
+
+                connection.commit()
+
+            except Exception:
+                connection.rollback()
+                raise
 
     def claim_for_dispatch(
         self,

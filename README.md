@@ -164,12 +164,13 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Implemented the reconciliation API endpoint.
 
 **Pending:**
-- [ ] Complete integration with the transaction execution/dispatch workflow.
+
+- [ ] Complete end-to-end verification of the transaction execution and reconciliation workflow.
 - [ ] Automatically trigger reconciliation for recovered `INDETERMINATE` transactions.
 - [ ] Verify the complete lost-response scenario (`drop_after_apply` → `INDETERMINATE` → reconciliation → `SUCCEEDED`).
 - [ ] Verify crash recovery and reconciliation end to end.
 - [ ] Verify duplicate-marker and partial-execution scenarios.
-### Demo Inactivity Overrides
+- [ ] Perform a complete real GitHub write demonstration through the TrustRail executor.
 
 ### Demo Inactivity Overrides
 
@@ -244,7 +245,23 @@ The complete generated file contains inactivity overrides for all 10 seeded issu
 - [x] Added JSON text-content fallback when structured content is unavailable.
 - [x] Displayed issue priority and inactivity duration alongside other issue attributes.
 - [x] Ensured issue retrieval does not bypass Otari through direct GitHub REST API calls.
+### Approval Management & Transaction Execution
 
+- [x] Implemented typed approval models with `APPROVE` and `REJECT` decisions.
+- [x] Implemented deterministic SHA-256 approval binding using canonical JSON.
+- [x] Bound approvals to the exact tool, arguments, policy version, authorization facts and Otari server revision.
+- [x] Implemented SQLite-backed `ApprovalStore` for approval creation, retrieval and verification.
+- [x] Added approval verification to reject mismatched transactions, rejected decisions and modified action bindings.
+- [x] Implemented the transaction executor in `app/txn/executor.py`.
+- [x] Integrated deterministic policy evaluation with transaction execution.
+- [x] Integrated read-only GitHub fact resolution through Otari MCP before authorization.
+- [x] Added approval verification before proceeding with an authorized write.
+- [x] Added fresh fact and MCP server revision checks before dispatch.
+- [x] Integrated atomic `PRECHECK` → `DISPATCHING` transaction claiming.
+- [x] Integrated single-attempt Otari MCP write execution without automatic retries.
+- [x] Added Otari request ID persistence for transaction execution.
+- [x] Integrated execution outcome classification into the transaction executor.
+- [x] Added approval-store unit tests covering creation, verification, rejection and binding mismatches.
 Available commands:
 
 ```bash
@@ -332,9 +349,15 @@ TrustRail/
 │   │   ├── exceptions.py
 │   │   ├── transitions.py
 │   │   ├── models.py
-│   │   └── store.py
-│   |   └── outcome_classifier.py
+│   │   ├── store.py
+│   │   ├── executor.py
+│   │   └── outcome_classifier.py
+│   │
 │   ├── approvals/
+│   │   ├── __init__.py
+│   │   ├── models.py
+│   │   ├── hashing.py
+│   │   └── store.py
 │   ├── ledger/
 │   │   ├── models.py
 │   │   ├── canonical.py
