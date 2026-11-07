@@ -8,9 +8,12 @@ import httpx
 
 
 def main() -> None:
-    base_url = os.environ.get("OTARI_BASE_URL", "").rstrip("/")
-    api_key = os.environ.get("OTARI_API_KEY", "")
-    server_id = os.environ.get("OTARI_MCP_SERVER_ID", "")
+    # base_url = os.environ.get("OTARI_BASE_URL", "").rstrip("/")
+    # api_key = os.environ.get("OTARI_API_KEY", "")
+    # server_id = os.environ.get("OTARI_MCP_SERVER_ID", "")
+    base_url="https://api.otari.ai/api/v1"
+    api_key="otk_v1_us_oEdKXmp9mSnfxtoS56gHh93n0fUiUeG12DzbbZc7sCE2gyFtw"
+    server_id="c4b3180f-e5cd-4510-b649-5f18b6ee9e96"
 
     missing = [
         name

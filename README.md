@@ -165,12 +165,12 @@ An authorization and transaction-control layer that lets AI agents act on real s
 
 **Pending:**
 
-- [ ] Complete end-to-end verification of the transaction execution and reconciliation workflow.
+- [x] Complete end-to-end verification of the real GitHub transaction execution workflow.
+- [ ] Complete end-to-end verification of the reconciliation workflow.
 - [ ] Automatically trigger reconciliation for recovered `INDETERMINATE` transactions.
 - [ ] Verify the complete lost-response scenario (`drop_after_apply` → `INDETERMINATE` → reconciliation → `SUCCEEDED`).
 - [ ] Verify crash recovery and reconciliation end to end.
 - [ ] Verify duplicate-marker and partial-execution scenarios.
-- [ ] Perform a complete real GitHub write demonstration through the TrustRail executor.
 
 ### Demo Inactivity Overrides
 
@@ -262,6 +262,49 @@ The complete generated file contains inactivity overrides for all 10 seeded issu
 - [x] Added Otari request ID persistence for transaction execution.
 - [x] Integrated execution outcome classification into the transaction executor.
 - [x] Added approval-store unit tests covering creation, verification, rejection and binding mismatches.
+### Real GitHub Write — End-to-End Verification
+
+- [x] Created a fresh transaction using the active `demo-close-issue-policy` (v1).
+- [x] Executed a real GitHub issue-close operation through the TrustRail executor and Otari MCP.
+- [x] Verified policy evaluation and the `PENDING_APPROVAL` transition.
+- [x] Created an approval bound to the exact tool, arguments, policy version, authorization facts and MCP server revision.
+- [x] Verified the executor's fresh-facts precheck before dispatch.
+- [x] Verified atomic `PRECHECK` → `DISPATCHING` dispatch claim.
+- [x] Executed the GitHub write through a single Otari MCP execution attempt.
+- [x] Persisted the Otari request ID in the transaction record.
+- [x] Independently verified the GitHub issue state and transaction marker through `get_issue_activity`.
+- [x] Verified exactly one transaction marker was present on the GitHub issue.
+- [x] Verified the transaction, approval and six ledger events were persisted in SQLite.
+- [x] Verified ledger hash-chain integrity using `LedgerStore.verify_chain()`.
+
+**Verified demonstration:**
+
+| Attribute | Result |
+|---|---|
+| Repository | `iamgoeldhruv/LimeDraw` |
+| Issue | #4 |
+| Transaction status | `SUCCEEDED` |
+| GitHub issue state | `closed` |
+| Matching transaction markers | 1 |
+| Approval decision | `APPROVE` |
+| Ledger events | 6 |
+| Ledger integrity | Valid |
+
+**Transaction ID:**
+`a6a29b66-513d-4ec6-9b60-4d07d3a98e47`
+
+**Otari write request ID:**
+`req_103e75bc664d46e3a7373615197838cb`
+
+**Otari verification request ID:**
+`req_710d926415294802a2b9271782a167ef`
+
+**GitHub matching comment ID:**
+`6710349235`
+
+The transaction was independently verified against GitHub and its corresponding database records and audit ledger.
+
+Note: This verifies the successful execution path. It does not establish a universal exactly-once execution guarantee.
 Available commands:
 
 ```bash
@@ -400,6 +443,9 @@ TrustRail/
 │   ├── smoke_github.py
 │   └── seed_sandbox.py
 │   └── demo_reset.py
+│   └── verify_github_write.py
+│   ├── demo_real_write.py
+│   ├── verify_transaction_ledger.py
 ├── docs/
 ├── demo-ages.json
 ├── Dockerfile
