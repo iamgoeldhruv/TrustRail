@@ -47,6 +47,15 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Added a counting HTTPX transport to verify execution request attempts.
 - [x] Configured a 60-second default timeout for the Otari MCP client.
 - [x] Ensured the execution client does not use automatic HTTP retries.
+- [x] Added `trustrail seed` CLI command to seed the configured GitHub sandbox repository.
+- [x] Reused the existing idempotent sandbox seeding implementation.
+- [x] Added `trustrail issues` CLI command to retrieve issue facts through Otari MCP.
+- [x] Integrated MCP tool discovery to identify the registered GitHub server's available tools.
+- [x] Executed the read-only `list_issues` tool through Otari using the discovered server revision.
+- [x] Added issue state and label filtering to the CLI.
+- [x] Added typed issue-fact models and response validation.
+- [x] Displayed repository, issue number, title, state, priority, labels and inactivity duration.
+- [x] Verified the complete TrustRail → Otari → GitHub MCP → GitHub REST API flow.
 
 ### MCP Server Spike
 
@@ -224,7 +233,32 @@ The complete generated file contains inactivity overrides for all 10 seeded issu
 - [x] Reset the GitHub MCP server fault-injection mode to `none` through the authenticated admin endpoint.
 - [x] Added post-reset verification to ensure all seeded issues are open and transaction comments have been removed.
 - [x] Made the reset operation idempotent so it can be safely executed multiple times.
+### Otari-Backed Issue Facts CLI
 
+- [x] Implemented `trustrail issues` to retrieve GitHub issue facts through the Otari gateway.
+- [x] Added MCP discovery before tool execution.
+- [x] Restricted the CLI to the explicitly allowlisted read-only `list_issues` tool.
+- [x] Passed the discovered `server_revision` during MCP execution.
+- [x] Added support for filtering issues by state (`open`, `closed`, `all`) and labels.
+- [x] Parsed and validated structured MCP responses into typed issue-fact models.
+- [x] Added JSON text-content fallback when structured content is unavailable.
+- [x] Displayed issue priority and inactivity duration alongside other issue attributes.
+- [x] Ensured issue retrieval does not bypass Otari through direct GitHub REST API calls.
+
+Available commands:
+
+```bash
+# Seed the GitHub sandbox
+trustrail seed
+
+# List open issues
+trustrail issues
+
+# List all issues
+trustrail issues --state all
+
+# Filter by priority
+trustrail issues --state open --label P1
 ## Running Locally
 
 ```bash
@@ -268,10 +302,16 @@ TrustRail/
 |   │   │   └── routes/
 |   │   │       ├── __init__.py
 |   │   │       └── reconciliation.py
-│   ├── cli/
-│   │   ├── main.py
-│   │   └── commands/
-│   │       └── ping.py
+|   │   ├── cli/
+|   │   │   ├── main.py
+|   │   │   └── commands/
+|   │   │       ├── ping.py
+|   │   │       ├── seed.py
+|   │   │       └── issues.py
+│   ├── facts/
+│   │   ├── __init__.py
+│   │   ├── models.py
+│   │   └── github.py
 │   ├── otari/
 │   │   ├── client.py
 │   │   ├── exceptions.py
