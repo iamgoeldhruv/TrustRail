@@ -1,8 +1,7 @@
-
 import asyncio
 import logging
 import os
-import re 
+import re
 from datetime import datetime, timezone
 
 import uvicorn
@@ -29,6 +28,7 @@ from mcp_github.admin_models import (
     FaultUpdateResponse,
 )
 from mcp_github.fault_injection import fault_controller
+
 logger = logging.getLogger("trustrail.mcp.github")
 from mcp_github.fault_injection import (
     FaultMode,
@@ -39,7 +39,9 @@ from mcp_github.fault_injection import (
     fault_controller,
     mark_response_for_drop,
 )
+
 mcp = MCPServer("TrustRail-GitHub")
+
 
 def _load_demo_ages(path: Path) -> dict[int, int]:
     if not path.exists():
@@ -49,9 +51,7 @@ def _load_demo_ages(path: Path) -> dict[int, int]:
         with path.open("r", encoding="utf-8") as file:
             data = json.load(file)
     except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"Invalid demo ages configuration: {path}"
-        ) from exc
+        raise ValueError(f"Invalid demo ages configuration: {path}") from exc
 
     if not isinstance(data, dict):
         raise ValueError("Demo ages configuration must be a JSON object.")
@@ -62,21 +62,18 @@ def _load_demo_ages(path: Path) -> dict[int, int]:
         try:
             number = int(issue_number)
         except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"Invalid issue number in demo ages: {issue_number}"
-            ) from exc
+            raise ValueError(f"Invalid issue number in demo ages: {issue_number}") from exc
 
         if number <= 0:
             raise ValueError("Issue numbers must be positive.")
 
         if type(inactive_days) is not int or inactive_days < 0:
-            raise ValueError(
-                f"Invalid inactive_days value for issue #{number}."
-            )
+            raise ValueError(f"Invalid inactive_days value for issue #{number}.")
 
         overrides[number] = inactive_days
 
     return overrides
+
 
 class IssueSummary(BaseModel):
     number: int
@@ -84,6 +81,7 @@ class IssueSummary(BaseModel):
     labels: list[str] = Field(default_factory=list)
     state: str
     inactive_days: int
+
 
 class IssueActivityResponse(BaseModel):
     repository: str
@@ -95,10 +93,14 @@ class IssueActivityResponse(BaseModel):
     marker_comment_count: int
     matching_comment_ids: list[int] = Field(default_factory=list)
     marker_count: int
+
+
 class ListIssuesResponse(BaseModel):
     repository: str
     total: int
     issues: list[IssueSummary]
+
+
 class GetIssueResponse(BaseModel):
     repository: str
     number: int
@@ -180,6 +182,8 @@ async def list_issues(
         total=len(summaries),
         issues=summaries,
     )
+
+
 @mcp.tool()
 async def get_issue(issue_number: int) -> GetIssueResponse:
     """
@@ -249,16 +253,9 @@ async def get_issue_activity(
 
         comments = await client.get_issue_comments(issue_number)
 
-    matching_comment_ids = [
-        comment.id
-        for comment in comments
-        if marker in comment.body
-    ]
+    matching_comment_ids = [comment.id for comment in comments if marker in comment.body]
 
-    marker_count = sum(
-        comment.body.count(marker)
-        for comment in comments
-    )
+    marker_count = sum(comment.body.count(marker) for comment in comments)
 
     return IssueActivityResponse(
         repository=settings.mcp_github_repo,
@@ -271,6 +268,8 @@ async def get_issue_activity(
         marker_count=marker_count,
         matching_comment_ids=matching_comment_ids,
     )
+
+
 class CloseIssueResponse(BaseModel):
     repository: str
     issue_number: int
@@ -280,6 +279,7 @@ class CloseIssueResponse(BaseModel):
     is_closed: bool
     comment_id: int
     comment_url: str | None = None
+
 
 import re
 
@@ -325,23 +325,18 @@ async def close_issue_with_note(
     comment_body = f"{note}\n\n{marker}"
 
     async with GitHubClient(settings=settings) as client:
-
         # 1. Verify that the issue exists and is currently open.
         issue = await client.get_issue(issue_number)
 
         if issue.state != "open":
-            raise ValueError(
-                f"Issue #{issue_number} is already closed."
-            )
+            raise ValueError(f"Issue #{issue_number} is already closed.")
 
         # 2. Defensive check against an existing transaction marker.
         # This is not a substitute for TrustRail's dispatch CAS.
         comments = await client.get_issue_comments(issue_number)
 
         if any(marker in comment.body for comment in comments):
-            raise ValueError(
-                f"Transaction marker already exists for {txn_id}."
-            )
+            raise ValueError(f"Transaction marker already exists for {txn_id}.")
 
         # 3. Create the transaction-marked comment.
         # Do not retry this POST.
@@ -386,6 +381,8 @@ async def close_issue_with_note(
         comment_id=comment.id,
         comment_url=comment.html_url,
     )
+
+
 async def update_fault_mode(request: Request) -> JSONResponse:
     settings = GitHubSettings()
 
@@ -429,6 +426,8 @@ async def update_fault_mode(request: Request) -> JSONResponse:
         status_code=200,
         content=response.model_dump(mode="json"),
     )
+
+
 def create_mcp_app():
     railway_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN")
 
@@ -444,22 +443,22 @@ def create_mcp_app():
         security_settings = None
 
     mcp_app = mcp.streamable_http_app(
-    json_response=True,
-    transport_security=security_settings,
+        json_response=True,
+        transport_security=security_settings,
     )
 
-    mcp_app = DropResponseMiddleware(mcp_app)
-
-    return Starlette(
-        routes=[
-            Route(
-                "/admin/fault",
-                endpoint=update_fault_mode,
-                methods=["POST"],
-            ),
-            Mount("/", app=mcp_app),
-        ]
+    # Register admin endpoint on the MCP application's router.
+    mcp_app.router.routes.insert(
+        0,
+        Route(
+            "/admin/fault",
+            endpoint=update_fault_mode,
+            methods=["POST"],
+        ),
     )
+
+    # Keep MCP as the root application so its lifespan runs.
+    return DropResponseMiddleware(mcp_app)
 
 
 def main() -> None:
@@ -476,8 +475,6 @@ def main() -> None:
         port=port,
         log_level="info",
     )
-
-
 
 
 if __name__ == "__main__":
