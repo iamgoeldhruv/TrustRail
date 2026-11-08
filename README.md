@@ -328,6 +328,37 @@ The complete generated file contains inactivity overrides for all 10 seeded issu
 The transaction was independently verified against GitHub and its corresponding database records and audit ledger.
 
 Note: This verifies the successful execution path. It does not establish a universal exactly-once execution guarantee.
+
+### Agent planner workflow
+
+The planner in `app/agent/orchestrator.py` sends the configured
+`TR_PLANNER_MODEL` a system prompt, the user's request, and exactly three
+model-facing tools:
+
+- `list_issues()` (no arguments)
+- `get_issue(issue_number: positive integer)`
+- `propose_close(issue_number: positive integer, reason: 1-1000 characters)`
+
+`AgentToolDispatcher` maintains this static allowlist, validates strict Pydantic
+arguments, and routes calls to `AgentToolHandlers`. The model never sees
+`close_issue_with_note`; `propose_close` only creates a `PROPOSED` transaction.
+The orchestrator supplies the trusted `run_id` separately, appends OpenAI-style
+assistant tool-call and matching `tool` messages, and then continues the
+conversation. GitHub issue content is treated as untrusted data.
+
+Each run is bounded by `TR_AGENT_MAX_ITERATIONS`,
+`TR_AGENT_MAX_TOOL_CALLS`, and `TR_AGENT_MAX_COMPLETION_TOKENS`. The
+`TR_AGENT_TOKEN_BUDGET` is enforced using provider-reported usage fields
+(`total_tokens` when available), accumulated across requests. If usage metadata
+is absent or malformed, the per-request completion cap and loop limits still
+apply; TrustRail does not invent token counts. Provider errors are surfaced,
+while tool validation and execution failures are returned to the model as
+structured errors. Results identify the run, counts, provider usage, and
+termination reason.
+
+The dispatcher and planner loop are covered by `tests/agent/`; tool-call
+response validation is covered by `tests/otari/`. Existing approval, policy,
+transaction, and ledger paths remain the only route to an actual GitHub write.
 Available commands:
 ### Policy Dry-run
 
@@ -417,7 +448,16 @@ TrustRail/
 │   ├── otari/
 │   │   ├── client.py
 │   │   ├── exceptions.py
-│   │   └── mcp.py
+│   │   ├── mcp.py
+│   │   └── response_validation.py
+│   ├── agent/
+│   │   ├── __init__.py
+│   │   ├── dispatcher.py
+│   │   ├── models.py
+│   │   ├── orchestrator.py
+│   │   ├── proposal_service.py
+│   │   ├── tool_handlers.py
+│   │   └── tools.py
 │   ├── policy/
 │   │   ├── models.py
 │   │   ├── parser.py
@@ -458,7 +498,6 @@ TrustRail/
 │   │   ├── canonical.py
 │   │   ├── hashing.py
 │   │   └── store.py
-│   ├── agent/
 │   ├── reconcile/
 │   │   ├── models.py
 │   │   ├── classifier.py
@@ -479,6 +518,13 @@ TrustRail/
 │   └── server.py
 ├── tests/
 │   ├── conftest.py
+│   ├── agent/
+│   │   ├── test_dispatcher.py
+│   │   ├── test_orchestrator.py
+│   │   ├── test_proposal_service.py
+│   │   ├── test_propose_close_handler.py
+│   │   ├── test_tool_handlers.py
+│   │   └── test_tools.py
 │   ├── db/
 │   ├── otari/
 │   ├── policy/

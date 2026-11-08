@@ -11,6 +11,7 @@ ALLOWED_TRANSITIONS: dict[TransactionState, frozenset[TransactionState]] = {
         {
             TransactionState.DENIED,
             TransactionState.PENDING_APPROVAL,
+            TransactionState.APPROVED,
         }
     ),
     TransactionState.DENIED: frozenset(),

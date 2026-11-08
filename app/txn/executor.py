@@ -68,10 +68,9 @@ class TransactionExecutor:
             policy,
             action,
             facts,
-            RunState(budget_consumed_actions=0),
+            RunState(budget_consumed_actions=self._budget_consumed_actions(transaction.run_id)),
         )
-
-        if decision.decision.value == "DENY":
+        if decision.decision.value in {"DENY", "POLICY_INVALID"}:
             return self.store.update_transaction_status(
                 transaction.id,
                 TransactionState.DENIED,
@@ -83,10 +82,14 @@ class TransactionExecutor:
                     transaction.id,
                     TransactionState.PENDING_APPROVAL,
                 )
-                raise ApprovalRequiredError(
-                    f"Transaction {transaction.id} requires approval"
-                )
+                raise ApprovalRequiredError(f"Transaction {transaction.id} requires approval")
             approval_id = approval_id or transaction.approval_id
+        elif decision.decision.value == "ALLOW":
+            if transaction.status is TransactionState.VALIDATING:
+                transaction = self.store.update_transaction_status(
+                    transaction.id,
+                    TransactionState.APPROVED,
+                )
 
         if approval_id is not None:
             self.approval_store.verify(
@@ -111,13 +114,8 @@ class TransactionExecutor:
                 TransactionState.PRECHECK,
             )
 
-        latest_discovery, latest_facts = await self._resolve_facts(
-            action.issue_number
-        )
-        if (
-            latest_discovery.server_revision != discovery.server_revision
-            or latest_facts != facts
-        ):
+        latest_discovery, latest_facts = await self._resolve_facts(action.issue_number)
+        if latest_discovery.server_revision != discovery.server_revision or latest_facts != facts:
             raise TransactionExecutionError(
                 "Approval invalidated because facts or server revision changed"
             )
@@ -147,6 +145,20 @@ class TransactionExecutor:
             target_state,
         )
 
+    def _budget_consumed_actions(self, run_id: str) -> int:
+        """Count actions that have consumed or reserved run capacity."""
+
+        capacity_states = {
+            TransactionState.DISPATCHING,
+            TransactionState.SUCCEEDED,
+            TransactionState.INDETERMINATE,
+            TransactionState.RECONCILING,
+        }
+
+        transactions = self.store.list_transactions(run_id=run_id)
+
+        return sum(transaction.status in capacity_states for transaction in transactions)
+
     async def _resolve_facts(
         self,
         issue_number: int,
@@ -174,10 +186,7 @@ class TransactionExecutor:
         if issue_facts.repository != self.expected_repository:
             raise TransactionExecutionError("Facts repository does not match")
         try:
-            issue = next(
-                item for item in issue_facts.issues
-                if item.number == issue_number
-            )
+            issue = next(item for item in issue_facts.issues if item.number == issue_number)
         except StopIteration as exc:
             raise TransactionExecutionError("Issue was not found") from exc
 
@@ -192,9 +201,7 @@ class TransactionExecutor:
     @staticmethod
     def _issue_state(value: str) -> Literal["open", "closed"]:
         if value not in {"open", "closed"}:
-            raise TransactionExecutionError(
-                f"Unsupported issue state: {value}"
-            )
+            raise TransactionExecutionError(f"Unsupported issue state: {value}")
         if value == "open":
             return "open"
         return "closed"

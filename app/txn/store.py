@@ -90,17 +90,22 @@ class TransactionStore:
         self.db_path = db_path
         self.ledger_store = LedgerStore(db_path)
 
+    
     def create_transaction(
         self,
         transaction: TransactionCreate,
     ) -> Transaction:
+        """Persist a transaction and its initial ledger event atomically."""
+
         now = _utc_now()
         created_at = transaction.created_at or now
         updated_at = transaction.updated_at or created_at
 
         with get_connection(self.db_path) as connection:
             try:
-                connection.execute(
+                _=connection.execute("BEGIN IMMEDIATE")
+
+                _ = connection.execute(
                     """
                     INSERT INTO transactions (
                         id, run_id, policy_id, policy_version, tool, args_json,
@@ -135,9 +140,25 @@ class TransactionStore:
                     ),
                 )
 
+                # Append the initial audit event in the SAME transaction.
+                _ = self.ledger_store.append_event_in_transaction(
+                    connection,
+                    LedgerEventCreate(
+                        txn_id=str(transaction.id),
+                        type="TRANSACTION_PROPOSED",
+                        payload={
+                            "run_id": transaction.run_id,
+                            "policy_id": transaction.policy_id,
+                            "policy_version": transaction.policy_version,
+                            "tool": transaction.tool,
+                            "initial_status": transaction.status.value,
+                        },
+                    ),
+                )
+
                 connection.commit()
 
-            except sqlite3.Error:
+            except Exception:
                 connection.rollback()
                 raise
 
@@ -148,6 +169,7 @@ class TransactionStore:
             created_at=created_at,
             updated_at=updated_at,
         )
+
 
     def get_transaction(
         self,

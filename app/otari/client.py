@@ -1,4 +1,6 @@
 
+from typing import Any
+
 import httpx
 
 from app.core.config import settings
@@ -9,6 +11,7 @@ from app.otari.exceptions import (
     OtariResponseError,
     OtariTimeoutError,
 )
+from app.otari.response_validation import _is_valid_completion
 
 
 class OtariClient:
@@ -29,15 +32,27 @@ class OtariClient:
     async def chat_completion(
         self,
         model: str,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        max_tokens: int | None = None,
     ) -> dict:
 
         url = f"{self.base_url}/chat/completions"
 
-        payload = {
+        payload: dict[str, Any] = {
             "model": model,
             "messages": messages,
         }
+        if tools is not None:
+            payload["tools"] = tools
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
+        if max_tokens is not None:
+            if max_tokens < 1:
+                raise ValueError("max_tokens must be positive")
+            payload["max_tokens"] = max_tokens
 
         try:
             response = await self.http_client.post(
@@ -76,19 +91,13 @@ class OtariClient:
                 "Otari returned invalid JSON."
             ) from exc
 
-        if (
-            not isinstance(data, dict)
-            or not isinstance(data.get("choices"), list)
-            or not data["choices"]
-            or not isinstance(data["choices"][0], dict)
-            or not isinstance(data["choices"][0].get("message"), dict)
-            or not isinstance(data["choices"][0]["message"].get("content"), str)
-        ):
+        if not _is_valid_completion(data):
             raise OtariResponseError(
                 "Otari returned an unexpected chat completion response."
             )
 
         return data
+
     async def aclose(self) -> None:
         await self.http_client.aclose()
 
