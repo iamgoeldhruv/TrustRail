@@ -9,7 +9,7 @@ from app.otari.mcp import OtariMCPClient
 from app.reconcile.engine import ReconciliationEngine
 from app.txn.store import TransactionStore
 
-
+from app.api.routes.dry_run import router as dryrun_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize database schema.
@@ -124,6 +124,7 @@ app = FastAPI(
 from app.api.routes.reconciliation import router as reconciliation_router
 
 app.include_router(reconciliation_router)
+app.include_router(dryrun_router)
 
 
 @app.get("/health")

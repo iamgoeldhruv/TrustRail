@@ -329,7 +329,21 @@ The transaction was independently verified against GitHub and its corresponding 
 
 Note: This verifies the successful execution path. It does not establish a universal exactly-once execution guarantee.
 Available commands:
+### Policy Dry-run
 
+- [x] Added typed dry-run response models in `app/dryrun/models.py`.
+- [x] Implemented the dry-run service in `app/dryrun/service.py`.
+- [x] Integrated dynamic Otari MCP tool discovery before fetching issue facts.
+- [x] Restricted dry-run execution to the read-only `list_issues` tool.
+- [x] Retrieved all repository issues using `state="all"` through Otari MCP.
+- [x] Added validation of returned issue facts and repository matching.
+- [x] Reused the existing deterministic authorization engine to evaluate each issue.
+- [x] Added per-issue decisions and reasons to the dry-run response.
+- [x] Added aggregate counts for allowed, approval-required, denied and policy-invalid decisions.
+- [x] Kept dry-run independent of transaction execution, approval creation and ledger writes.
+- [x] Exposed the functionality through `POST /api/v1/policies/dryrun`.
+- [x] Added unit tests covering successful evaluation, read-only tool usage, repository mismatch, Otari errors and malformed facts.
+- [x] Verified the endpoint against the live GitHub sandbox through the hosted Otari MCP gateway.
 ```bash
 # Seed the GitHub sandbox
 trustrail seed
@@ -385,12 +399,17 @@ TrustRail/
 |   │   │   └── routes/
 |   │   │       ├── __init__.py
 |   │   │       └── reconciliation.py
-|   │   ├── cli/
-|   │   │   ├── main.py
-|   │   │   └── commands/
-|   │   │       ├── ping.py
-|   │   │       ├── seed.py
-|   │   │       └── issues.py
+|   |   │       └── dryrun.py
+│   ├── cli/
+│   │   ├── main.py
+│   │   └── commands/
+│   │       ├── ping.py
+│   │       ├── seed.py
+│   │       └── issues.py
+|   ├── dryrun/
+|   │   ├── __init__.py
+|   │   ├── models.py
+|   │   └── service.py
 │   ├── facts/
 │   │   ├── __init__.py
 │   │   ├── models.py
@@ -466,6 +485,7 @@ TrustRail/
 │   ├── authz/
 │   ├── txn/
 │   └── ledger/
+|   └── dryrun/
 ├── migrations/
 │   ├── 001_initial_schema.sql
 │   ├── 002_transaction_indexes.sql
