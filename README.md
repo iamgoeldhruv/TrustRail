@@ -359,6 +359,22 @@ termination reason.
 The dispatcher and planner loop are covered by `tests/agent/`; tool-call
 response validation is covered by `tests/otari/`. Existing approval, policy,
 transaction, and ledger paths remain the only route to an actual GitHub write.
+
+### Proposal evaluation
+
+After a proposal is created, `ProposalEvaluationService` independently loads
+the transaction's policy and retrieves the issue through the read-only
+`list_issues` MCP tool. It passes only validated ground-truth facts to the
+existing deterministic authorization engine; model-provided claims are never
+authorization evidence. The resulting `ALLOW`, `REQUIRES_APPROVAL`, `DENY`, or
+`POLICY_INVALID` decision is stored with its reasons, facts snapshot, policy
+version, and evaluation timestamp.
+
+Decision persistence is atomic with the transaction status transition and an
+`AUTHORIZATION_DECISION` ledger event. The event includes the action arguments,
+run identifier, policy version, facts, decision, and machine-readable reasons,
+and remains part of the existing hash chain. Proposal evaluation never invokes
+`close_issue_with_note`; approval and execution remain separate workflows.
 Available commands:
 ### Policy Dry-run
 
@@ -455,6 +471,7 @@ TrustRail/
 │   │   ├── dispatcher.py
 │   │   ├── models.py
 │   │   ├── orchestrator.py
+│   │   ├── evaluation.py
 │   │   ├── proposal_service.py
 │   │   ├── tool_handlers.py
 │   │   └── tools.py
@@ -520,6 +537,7 @@ TrustRail/
 │   ├── conftest.py
 │   ├── agent/
 │   │   ├── test_dispatcher.py
+│   │   ├── test_evaluation.py
 │   │   ├── test_orchestrator.py
 │   │   ├── test_proposal_service.py
 │   │   ├── test_propose_close_handler.py
@@ -536,6 +554,7 @@ TrustRail/
 │   ├── 001_initial_schema.sql
 │   ├── 002_transaction_indexes.sql
 │   └── 003_events_append_only.sql
+│   └── 004_authorization_decisions.sql
 ├── scripts/
 │   ├── discover_otari_mcp.py
 │   ├── execute_otari_mcp.py

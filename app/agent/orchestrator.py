@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import dataclass, field
+from html import escape
 from typing import Any
 
 from app.agent.dispatcher import AgentToolDispatcher
 from app.agent.tool_handlers import AgentToolError
 from app.agent.tools import AGENT_TOOLS
 from app.core.config import settings
-from copy import deepcopy
-from html import escape
+
 MAX_TOOL_RESULT_LENGTH = 32_768
 
 
@@ -31,6 +32,7 @@ class AgentOrchestrator:
         *,
         client: Any,
         dispatcher: AgentToolDispatcher,
+        proposal_evaluator: Any | None = None,
         model: str | None = None,
         max_iterations: int | None = None,
         max_tool_calls: int | None = None,
@@ -61,6 +63,7 @@ class AgentOrchestrator:
     ) -> None:
         self.client = client
         self.dispatcher = dispatcher
+        self.proposal_evaluator = proposal_evaluator
         self.model = model or settings.tr_planner_model
         self.max_iterations = (
             max_iterations if max_iterations is not None else settings.tr_agent_max_iterations
@@ -203,6 +206,22 @@ class AgentOrchestrator:
                 )
 
                 if isinstance(tool_name, str):
+                    if (
+                        tool_name == "propose_close"
+                        and self.proposal_evaluator is not None
+                        and isinstance(tool_result.get("transaction_id"), str)
+                    ):
+                        evaluated = await self.proposal_evaluator.evaluate(
+                            tool_result["transaction_id"]
+                        )
+                        tool_result = {
+                            **tool_result,
+                            "authorization": {
+                                "decision": evaluated.authorization_decision,
+                                "reasons": evaluated.authorization_reasons or [],
+                                "status": evaluated.status.value,
+                            },
+                        }
                     tool_result = self._delimit_untrusted_github_content(
                         tool_name,
                         tool_result,

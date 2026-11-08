@@ -11,15 +11,14 @@ from uuid import UUID
 from app.db.connection import get_connection
 from app.ledger.models import LedgerEventCreate
 from app.ledger.store import LedgerStore
-from app.txn.exceptions import TransactionNotFoundError
+from app.txn.exceptions import (
+    ApprovalAlreadyAttachedError,
+    TransactionNotFoundError,
+)
 from app.txn.models import Transaction, TransactionCreate
 from app.txn.states import TransactionState
 from app.txn.transitions import transition
-from app.txn.exceptions import (
-    ApprovalAlreadyAttachedError,
-    InvalidTransitionError,
-    TransactionNotFoundError,
-)
+
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
@@ -44,6 +43,17 @@ def _row_to_transaction(row: sqlite3.Row) -> Transaction:
             facts=(
                 json.loads(row["facts_json"])
                 if row["facts_json"] is not None
+                else None
+            ),
+            authorization_decision=row["authorization_decision"],
+            authorization_reasons=(
+                json.loads(row["authorization_reasons_json"])
+                if row["authorization_reasons_json"] is not None
+                else None
+            ),
+            evaluated_at=(
+                datetime.fromisoformat(row["evaluated_at"])
+                if row["evaluated_at"] is not None
                 else None
             ),
             approval_id=row["approval_id"],
@@ -109,9 +119,11 @@ class TransactionStore:
                     """
                     INSERT INTO transactions (
                         id, run_id, policy_id, policy_version, tool, args_json,
-                        args_hash, status, server_revision, facts_json, approval_id,
-                        otari_request_ids_json, attempt, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        args_hash, status, server_revision, facts_json,
+                        authorization_decision, authorization_reasons_json,
+                        evaluated_at, approval_id, otari_request_ids_json,
+                        attempt, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         str(transaction.id),
@@ -126,6 +138,17 @@ class TransactionStore:
                         (
                             _json_dumps(transaction.facts)
                             if transaction.facts is not None
+                            else None
+                        ),
+                        transaction.authorization_decision,
+                        (
+                            _json_dumps(transaction.authorization_reasons)
+                            if transaction.authorization_reasons is not None
+                            else None
+                        ),
+                        (
+                            transaction.evaluated_at.isoformat()
+                            if transaction.evaluated_at is not None
                             else None
                         ),
                         transaction.approval_id,
@@ -245,6 +268,121 @@ class TransactionStore:
             raise TransactionNotFoundError(transaction_id)
 
         return updated
+
+    def persist_authorization_decision(
+        self,
+        transaction_id: UUID | str,
+        *,
+        decision: str,
+        reasons: list[str],
+        facts: Any,
+        evaluated_at: datetime,
+        target_state: TransactionState,
+    ) -> Transaction:
+        """Persist an authorization result and its audit event atomically."""
+        transaction_id = str(transaction_id)
+        if target_state not in {
+            TransactionState.DENIED,
+            TransactionState.PENDING_APPROVAL,
+            TransactionState.APPROVED,
+        }:
+            raise ValueError("Invalid authorization target state")
+
+        with get_connection(self.db_path) as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT * FROM transactions WHERE id = ?",
+                    (transaction_id,),
+                ).fetchone()
+                if row is None:
+                    raise TransactionNotFoundError(transaction_id)
+
+                if row["authorization_decision"] is not None:
+                    existing = _row_to_transaction(row)
+                    connection.commit()
+                    return existing
+
+                current = TransactionState(row["status"])
+                if current is TransactionState.PROPOSED:
+                    transition(current, TransactionState.VALIDATING)
+                    connection.execute(
+                        "UPDATE transactions SET status = ? WHERE id = ?",
+                        (TransactionState.VALIDATING.value, transaction_id),
+                    )
+                    self.ledger_store.append_event_in_transaction(
+                        connection,
+                        LedgerEventCreate(
+                            txn_id=transaction_id,
+                            type="TRANSACTION_STATUS_CHANGED",
+                            payload={
+                                "from_status": current.value,
+                                "to_status": TransactionState.VALIDATING.value,
+                            },
+                        ),
+                    )
+                    current = TransactionState.VALIDATING
+
+                transition(current, target_state)
+                now = evaluated_at.astimezone(UTC).isoformat()
+                connection.execute(
+                    """
+                    UPDATE transactions
+                    SET status = ?, facts_json = ?, authorization_decision = ?,
+                        authorization_reasons_json = ?, evaluated_at = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        target_state.value,
+                        _json_dumps(facts),
+                        decision,
+                        _json_dumps(reasons),
+                        now,
+                        now,
+                        transaction_id,
+                    ),
+                )
+                self.ledger_store.append_event_in_transaction(
+                    connection,
+                    LedgerEventCreate(
+                        txn_id=transaction_id,
+                        type="AUTHORIZATION_DECISION",
+                        payload={
+                            "run_id": row["run_id"],
+                            "tool": row["tool"],
+                            "args": json.loads(row["args_json"]),
+                            "decision": decision,
+                            "reasons": reasons,
+                            "policy_version": row["policy_version"],
+                            "facts": facts,
+                            "evaluated_at": now,
+                        },
+                        ts=evaluated_at,
+                    ),
+                )
+                self.ledger_store.append_event_in_transaction(
+                    connection,
+                    LedgerEventCreate(
+                        txn_id=transaction_id,
+                        type="TRANSACTION_STATUS_CHANGED",
+                        payload={
+                            "from_status": current.value,
+                            "to_status": target_state.value,
+                            "reason": "authorization_decision",
+                        },
+                        ts=evaluated_at,
+                    ),
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+
+        result = self.get_transaction(transaction_id)
+        if result is None:
+            raise TransactionNotFoundError(transaction_id)
+        return result
 
     def list_transactions(
         self,

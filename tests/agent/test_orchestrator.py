@@ -22,6 +22,23 @@ class FakeDispatcher:
         return {"issues": []}
 
 
+class FakeProposalEvaluator:
+    def __init__(self):
+        self.calls = []
+
+    async def evaluate(self, transaction_id):
+        self.calls.append(transaction_id)
+        return type(
+            "Evaluated",
+            (),
+            {
+                "authorization_decision": "REQUIRES_APPROVAL",
+                "authorization_reasons": ["conditions_satisfied"],
+                "status": type("Status", (), {"value": "PENDING_APPROVAL"})(),
+            },
+        )()
+
+
 def completion(message, usage=None):
     result = {"choices": [{"message": message}]}
     if usage is not None:
@@ -108,6 +125,53 @@ async def test_limits_stop_repeated_tool_calls():
 
     assert result.termination_reason == "tool_call_limit"
     assert result.tool_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_proposals_are_evaluated_before_returning_tool_result():
+    response = completion(
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call-propose",
+                    "type": "function",
+                    "function": {
+                        "name": "propose_close",
+                        "arguments": '{"issue_number":7,"reason":"inactive"}',
+                    },
+                }
+            ],
+        }
+    )
+    final = completion({"role": "assistant", "content": "proposal evaluated"})
+    client = FakeClient([response, final])
+    evaluator = FakeProposalEvaluator()
+
+    class ProposalDispatcher(FakeDispatcher):
+        async def dispatch(self, **kwargs):
+            self.calls.append(kwargs)
+            return {
+                "status": "PROPOSED",
+                "transaction_id": "txn-1",
+                "issue_number": 7,
+            }
+
+    result = await AgentOrchestrator(
+        client=client,
+        dispatcher=ProposalDispatcher(),
+        proposal_evaluator=evaluator,
+        model="planner",
+    ).run(run_id="trusted", user_request="propose a close")
+
+    assert result.response == "proposal evaluated"
+    assert evaluator.calls == ["txn-1"]
+    assert client.calls[1]["messages"][-1]["content"] == (
+        '{"status":"PROPOSED","transaction_id":"txn-1","issue_number":7,'
+        '"authorization":{"decision":"REQUIRES_APPROVAL",'
+        '"reasons":["conditions_satisfied"],"status":"PENDING_APPROVAL"}}'
+    )
 def test_list_issues_delimits_untrusted_content_and_escapes_tags():
     original = {
         "repository": "iamgoeldhruv/LimeDraw",

@@ -17,7 +17,6 @@ from app.txn.models import Transaction, TransactionCreate
 from app.txn.states import TransactionState
 from app.txn.store import TransactionStore
 
-
 WRITE_TOOL = "close_issue_with_note"
 
 

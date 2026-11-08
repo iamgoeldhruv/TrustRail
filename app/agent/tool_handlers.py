@@ -1,7 +1,7 @@
 
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
-from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -21,7 +21,6 @@ from app.facts.github import (
 )
 from app.otari.exceptions import OtariMCPError
 from app.otari.mcp import OtariMCPClient
-
 
 # This is a static TrustRail security boundary.
 # Never derive tool permissions from MCP annotations.
@@ -313,6 +312,10 @@ class AgentToolHandlers:
             raise AgentToolError(
                 "Invalid arguments for propose_close."
             ) from exc
+        if not parsed_args.reason.strip():
+            raise AgentToolError(
+                "Invalid arguments for propose_close."
+            )
 
         try:
             transaction = self.proposal_service.create_close_proposal(

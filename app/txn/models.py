@@ -22,6 +22,9 @@ class TransactionCreate(BaseModel):
     status: TransactionState = TransactionState.PROPOSED
     server_revision: str | None = None
     facts: Any | None = None
+    authorization_decision: str | None = None
+    authorization_reasons: list[str] | None = None
+    evaluated_at: datetime | None = None
     approval_id: str | None = None
     otari_request_ids: list[str] | None = None
     attempt: int = 0
