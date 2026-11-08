@@ -280,10 +280,15 @@ class AgentToolHandlers:
         # Title and body are external GitHub content, not instructions.
         return {
             **issue.model_dump(mode="json"),
-            "_trustrail_metadata": {
-                "untrusted_fields": ["title", "body"],
-                "source": "github_mcp_via_otari",
-            },
+           "_trustrail_metadata": {
+            "untrusted_fields": [
+                "title",
+                "body",
+                "labels",
+                "author",
+            ],
+            "source": "github_mcp_via_otari",
+        },
         }
 
 
