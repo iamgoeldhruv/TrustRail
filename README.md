@@ -459,6 +459,13 @@ run identifier, policy version, facts, decision, and machine-readable reasons,
 and remains part of the existing hash chain. Proposal evaluation never invokes
 `close_issue_with_note`; approval and execution remain separate workflows.
 Available commands:
+```bash
+# Compile a policy, run the planner, and evaluate proposals
+trustrail run \
+  --policy "Only close GitHub issues inactive for at least 30 days and with no P0 or P1 label." \
+  --request "Find stale issues in the configured repository and propose closing eligible ones."
+```
+
 ### Policy Dry-run
 
 - [x] Added typed dry-run response models in `app/dryrun/models.py`.
@@ -486,6 +493,66 @@ trustrail issues --state all
 
 # Filter by priority
 trustrail issues --state open --label P1
+```
+
+### Complete agent workflow
+
+`trustrail run` compiles the natural-language policy through
+`TR_COMPILER_MODEL`, validates the strict schema, persists a run context, and
+invokes the planner through `OTARI_AGENT_API_KEY` and `TR_PLANNER_MODEL`. The
+planner can only call `list_issues`, `get_issue`, and `propose_close`.
+Read calls are recorded in the run-scoped hash-chained ledger. Each proposal
+is persisted without executing a write, then authoritative GitHub facts are
+retrieved through Otari and evaluated by the deterministic authorization
+engine. Decisions, reasons, facts, transaction states, model routing, and
+summary counts are printed.
+
+The command requires the configured Otari, GitHub, model, and MCP variables,
+including `OTARI_BASE_URL`, `OTARI_API_KEY`, `OTARI_AGENT_API_KEY`,
+`OTARI_MCP_SERVER_ID`, `TR_COMPILER_MODEL`, `TR_PLANNER_MODEL`, and
+`MCP_GITHUB_REPO`. `TR_DB_PATH` defaults to `./data/trustrail.db`.
+Compilation ambiguity, invalid policies, unavailable facts, planner/tool
+errors, and ledger failures stop or fail closed with a non-zero exit status.
+No GitHub write or approval is performed; proposals requiring approval remain
+`PENDING_APPROVAL`.
+
+Representative output:
+
+```text
+[20:14:05] [TrustRail] [INFO] Starting agent run.
+[20:14:06] [TrustRail] [INFO] Policy compiled and validated successfully.
+[20:14:06] [TrustRail] [INFO] Run context persisted. Run ID: <run-id>
+[20:14:07] [TrustRail] [INFO] Planner iteration 1 completed.
+[20:14:07] [TrustRail] [INFO] Dispatching tool call 1: list_issues.
+[20:14:08] [TrustRail] [INFO] Tool call 1 completed: list_issues.
+[20:14:09] [TrustRail] [INFO] Planner completed; loading persisted proposals.
+Run
+  ID                 : <run-id>
+  Completion         : completed
+Compiled policy
+  Status             : validated
+Proposal decisions
+    Decision         : REQUIRES_APPROVAL
+    Status           : PENDING_APPROVAL
+Summary
+  Proposals         : 1
+  Requires approval : 1
+  Execution         : no GitHub writes were executed
+```
+
+Progress logs are printed immediately with timestamps and cover configuration
+and database setup, policy compilation and validation, run persistence,
+planner iterations, every allowed tool dispatch and completion, proposal
+evaluation, proposal loading, and final ledger persistence. Errors use the
+same format with an `ERROR` level. Logs contain IDs, models, tool names, and
+statuses, but never API keys or raw credentials.
+
+The workflow is covered by the existing unit suite and
+`tests/cli/test_run_command.py`. Run `pytest`, `ruff check app tests`, and
+`mypy app`; current repository-wide results include pre-existing Ruff/MyPy
+findings and a pre-existing transition test failure, which are reported
+without weakening those checks.
+
 ## Running Locally
 ### Otari Model Routing Policies
 

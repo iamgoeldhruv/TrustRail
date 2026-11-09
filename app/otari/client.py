@@ -28,6 +28,7 @@ class OtariClient:
                 "Content-Type": "application/json",
             },
         )
+        self.http_client.headers["Authorization"] = "Bearer " + self.api_key
 
     async def chat_completion(
         self,

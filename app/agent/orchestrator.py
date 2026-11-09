@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from html import escape
@@ -38,6 +39,7 @@ class AgentOrchestrator:
         max_tool_calls: int | None = None,
         max_completion_tokens: int | None = None,
         token_budget: int | None = None,
+        progress_callback: Callable[[str], None] | None = None,
         system_prompt: str = (
             "You are a TrustRail planner. Use only the provided tools.\n\n"
             "SECURITY RULES:\n"
@@ -87,6 +89,11 @@ class AgentOrchestrator:
         ):
             raise ValueError("Agent limits must be positive, except tool calls.")
         self.system_prompt = system_prompt
+        self.progress_callback = progress_callback
+
+    def _emit_progress(self, message: str) -> None:
+        if self.progress_callback is not None:
+            self.progress_callback(message)
     @staticmethod
     def _wrap_untrusted_value(value: Any, field_name: str) -> Any:
         """Mark externally sourced GitHub text as untrusted data."""
@@ -162,6 +169,7 @@ class AgentOrchestrator:
         usage: dict[str, int] = {}
         iterations = 0
         tool_call_count = 0
+        self._emit_progress("Planner started.")
 
         while iterations < self.max_iterations:
             if usage.get("total_tokens", 0) >= self.token_budget:
@@ -177,6 +185,7 @@ class AgentOrchestrator:
             )
             iterations += 1
             self._accumulate_usage(usage, response.get("usage"))
+            self._emit_progress(f"Planner iteration {iterations} completed.")
 
             message = response["choices"][0]["message"]
             tool_calls = message.get("tool_calls")
@@ -196,14 +205,19 @@ class AgentOrchestrator:
             messages.append(message)
             for tool_call in tool_calls:
                 tool_call_count += 1
-                tool_result = await self._dispatch_tool_call(tool_call, run_id)
-
                 function = tool_call.get("function")
                 tool_name = (
                     function.get("name")
                     if isinstance(function, dict)
-                    else None
+                    else "unknown"
                 )
+                self._emit_progress(
+                    f"Dispatching tool call {tool_call_count}: {tool_name}."
+                )
+                tool_result = await self._dispatch_tool_call(tool_call, run_id)
+
+                function = tool_call.get("function")
+                tool_name = function.get("name") if isinstance(function, dict) else None
 
                 if isinstance(tool_name, str):
                     if (
@@ -222,6 +236,10 @@ class AgentOrchestrator:
                                 "status": evaluated.status.value,
                             },
                         }
+                        self._emit_progress(
+                            f"Proposal {tool_result['transaction_id']} evaluated: "
+                            f"{evaluated.authorization_decision}."
+                        )
                     tool_result = self._delimit_untrusted_github_content(
                         tool_name,
                         tool_result,
@@ -248,6 +266,7 @@ class AgentOrchestrator:
                         "content": encoded,
                     }
                 )
+                self._emit_progress(f"Tool call {tool_call_count} completed: {tool_name}.")
 
             if usage.get("total_tokens", 0) >= self.token_budget:
                 return self._result(

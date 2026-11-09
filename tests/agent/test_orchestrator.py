@@ -64,6 +64,43 @@ async def test_final_response_uses_configured_model_and_tools():
 
 
 @pytest.mark.asyncio
+async def test_progress_callback_reports_planner_and_tool_steps():
+    client = FakeClient(
+        [
+            completion(
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {"name": "list_issues", "arguments": "{}"},
+                        }
+                    ],
+                }
+            ),
+            completion({"role": "assistant", "content": "done"}),
+        ]
+    )
+    messages = []
+
+    await AgentOrchestrator(
+        client=client,
+        dispatcher=FakeDispatcher(),
+        progress_callback=messages.append,
+    ).run(run_id="run-1", user_request="show issues")
+
+    assert messages == [
+        "Planner started.",
+        "Planner iteration 1 completed.",
+        "Dispatching tool call 1: list_issues.",
+        "Tool call 1 completed: list_issues.",
+        "Planner iteration 2 completed.",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_tool_call_loop_preserves_call_id_and_trusted_run_id():
     client = FakeClient(
         [

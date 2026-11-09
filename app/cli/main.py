@@ -3,6 +3,7 @@ import asyncio
 
 from app.cli.commands.issues import issues_command
 from app.cli.commands.ping import ping_command
+from app.cli.commands.run import run_command
 from app.cli.commands.seed import seed_command
 
 
@@ -48,6 +49,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Filter by label. Can be supplied multiple times.",
     )
 
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Compile a policy, run the planner, and evaluate proposals.",
+    )
+    run_parser.add_argument("--policy", required=True, help="Natural-language policy.")
+    run_parser.add_argument("--request", required=True, help="Natural-language task or request.")
+
     return parser
 
 
@@ -67,6 +75,11 @@ def main() -> None:
                 state=args.state,
                 labels=args.labels,
             )
+        )
+
+    elif args.command == "run":
+        exit_code = asyncio.run(
+            run_command(policy=args.policy, request=args.request)
         )
 
     else:

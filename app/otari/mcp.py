@@ -11,16 +11,14 @@ from pydantic import (
 )
 
 from app.otari.exceptions import (
+    OtariExecutionState,
     OtariMCPError,
+    OtariMCPErrorBody,
+    OtariMCPErrorCode,
     OtariMCPNotStartedError,
     OtariMCPOutcomeUnknownError,
     OtariMCPResponseError,
     OtariMCPServerChangedError,
-)
-from app.otari.exceptions import (
-    OtariExecutionState,
-    OtariMCPErrorBody,
-    OtariMCPErrorCode,
 )
 
 
@@ -101,6 +99,7 @@ class OtariMCPClient:
             follow_redirects=False,
             transport=transport,
         )
+        self._client.headers["Authorization"] = "Bearer " + api_key
 
     @staticmethod
     def _parse_error_response(
@@ -124,8 +123,6 @@ class OtariMCPClient:
         retry_after = response.headers.get("Retry-After")
 
         try:
-            payload = response.json()
-
             error_body = OtariMCPErrorBody.model_validate_json(response.content)
 
         except (ValueError, ValidationError, TypeError):
