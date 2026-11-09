@@ -16,9 +16,9 @@ from app.otari.response_validation import _is_valid_completion
 
 class OtariClient:
 
-    def __init__(self):
+    def __init__(self,*,api_key: str | None = None):
         self.base_url = settings.otari_base_url.rstrip("/")
-        self.api_key = settings.otari_api_key
+        self.api_key = api_key or settings.otari_api_key
         self.timeout = settings.otari_timeout
 
         self.http_client = httpx.AsyncClient(

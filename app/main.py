@@ -37,9 +37,12 @@ async def lifespan(app: FastAPI):
     app.state.policy_compiler = None
 
     # Chat completions are independent of GitHub MCP configuration.
-    async with OtariClient() as chat_client:
+    async with (
+        OtariClient() as compiler_client,
+        OtariClient(api_key=settings.otari_agent_api_key) as planner_client,
+    ):
         app.state.policy_compiler = PolicyCompiler(
-            otari_client=chat_client,
+            otari_client=compiler_client,
             model=settings.tr_compiler_model,
         )
 
@@ -78,7 +81,7 @@ async def lifespan(app: FastAPI):
                 )
 
                 app.state.agent_orchestrator = AgentOrchestrator(
-                    client=chat_client,
+                    client=planner_client,
                     dispatcher=dispatcher,
                     proposal_evaluator=proposal_evaluator,
                 )

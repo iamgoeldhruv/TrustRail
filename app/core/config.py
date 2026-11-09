@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     mcp_github_pat: str
     mcp_github_repo: str
     mcp_admin_token: str
+    otari_agent_api_key: str  # Dedicated agent-run key
     
 
     # # Development configuration

@@ -522,6 +522,40 @@ The underlying model and provider selection is managed by Otari. TrustRail does 
 Both routing policies use the same Otari chat-completions gateway, demonstrating multi-model and multi-provider routing through a unified integration.
 
 Routing policy names must not contain `:` or `/`.
+### Dedicated Planner API Key & Budget
+
+Configured a dedicated Otari API key for agent planner inference to isolate planner usage from policy compilation.
+
+**Credential configuration**
+
+| Environment variable | Responsibility |
+|---|---|
+| `OTARI_API_KEY` | Policy compiler and existing Otari MCP operations |
+| `OTARI_AGENT_API_KEY` | Agent planner chat-completion requests |
+
+**Planner configuration**
+
+- Created the Otari virtual API key `agent-run`.
+- Configured a $4 monthly per-key spending limit.
+- The key-level limit applies within the existing $20 hackathon-provided Otari allocation; it does not create additional credits.
+- Kept `TR_PLANNER_MODEL=trustrail-planner`.
+- Planner inference uses `OTARI_AGENT_API_KEY`.
+- Policy compilation continues using `OTARI_API_KEY` and `TR_COMPILER_MODEL=trustrail-compiler`.
+- Updated `OtariClient` to support an optional API-key override while preserving the existing default credential behavior.
+- Injected separate Otari chat clients into `AgentOrchestrator` and `PolicyCompiler`.
+- Kept the existing Otari MCP client configuration unchanged.
+
+**Verification**
+
+- [x] Added `OTARI_AGENT_API_KEY` to application settings.
+- [x] Updated `.env.example`.
+- [x] Added optional API-key injection to `OtariClient`.
+- [x] Wired a dedicated planner client into `AgentOrchestrator`.
+- [x] Preserved the existing compiler client configuration.
+- [x] Ruff checks passed.
+- [x] MyPy checks passed.
+- [x] Pytest suite passed.
+
 
 **Architecture:**
 
