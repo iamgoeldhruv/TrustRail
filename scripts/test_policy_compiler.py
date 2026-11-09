@@ -1,4 +1,3 @@
-
 import argparse
 import asyncio
 import sys
@@ -10,6 +9,8 @@ from app.policy.compiler_models import (
     AmbiguousResponse,
 )
 from app.policy.models import CompiledPolicyResponse, Policy
+
+from app.core.config import settings
 
 
 @dataclass
@@ -75,8 +76,7 @@ def verify_policy(policy: Policy, case: TestCase) -> list[str]:
 
     if conditions.inactive_days_gte != case.expected_inactive_days:
         errors.append(
-            f"Expected inactivity={case.expected_inactive_days}, "
-            f"got {conditions.inactive_days_gte}"
+            f"Expected inactivity={case.expected_inactive_days}, got {conditions.inactive_days_gte}"
         )
 
     if set(conditions.priority_not_in) != case.expected_priorities:
@@ -85,10 +85,7 @@ def verify_policy(policy: Policy, case: TestCase) -> list[str]:
             f"got {conditions.priority_not_in}"
         )
 
-    if (
-        conditions.require_priority_label
-        != case.expected_require_priority_label
-    ):
+    if conditions.require_priority_label != case.expected_require_priority_label:
         errors.append("Incorrect require_priority_label value")
 
     if close.requires_approval != case.expected_approval:
@@ -123,17 +120,13 @@ def verify_summary(
     conditions = policy.actions.close_issue.conditions
 
     if conditions is not None:
-        expected_inactivity = (
-            f"{conditions.inactive_days_gte} days"
-        )
+        expected_inactivity = f"{conditions.inactive_days_gte} days"
         if expected_inactivity not in summary:
             errors.append("Summary does not contain the inactivity threshold.")
 
         for priority in conditions.priority_not_in:
             if priority not in summary:
-                errors.append(
-                    f"Summary does not contain excluded priority {priority}."
-                )
+                errors.append(f"Summary does not contain excluded priority {priority}.")
 
         if conditions.require_priority_label:
             if "Issues must have a priority label." not in summary:
@@ -149,16 +142,11 @@ def verify_summary(
         if "Human approval is not required before closing." not in summary:
             errors.append("Summary incorrectly describes approval requirement.")
 
-    expected_limit = (
-        f"Maximum actions per run: {policy.limits.max_actions_per_run}."
-    )
+    expected_limit = f"Maximum actions per run: {policy.limits.max_actions_per_run}."
     if expected_limit not in summary:
         errors.append("Summary does not contain the action limit.")
 
-    expected_audit = (
-        f"Audit logging: "
-        f"{'enabled' if policy.audit.enabled else 'disabled'}."
-    )
+    expected_audit = f"Audit logging: {'enabled' if policy.audit.enabled else 'disabled'}."
     if expected_audit not in summary:
         errors.append("Summary does not correctly describe audit logging.")
 
@@ -227,18 +215,9 @@ async def run_case(
 
         print("PASS: Policy generated and semantic checks passed.")
         print(f"Repository: {policy.repo}")
-        print(
-            "Inactive days: "
-            f"{policy.actions.close_issue.conditions.inactive_days_gte}"
-        )
-        print(
-            "Excluded priorities: "
-            f"{policy.actions.close_issue.conditions.priority_not_in}"
-        )
-        print(
-            "Requires approval: "
-            f"{policy.actions.close_issue.requires_approval}"
-        )
+        print(f"Inactive days: {policy.actions.close_issue.conditions.inactive_days_gte}")
+        print(f"Excluded priorities: {policy.actions.close_issue.conditions.priority_not_in}")
+        print(f"Requires approval: {policy.actions.close_issue.requires_approval}")
 
         print("\nGenerated policy summary:")
         print(result.summary)
@@ -259,8 +238,8 @@ async def main():
 
     parser.add_argument(
         "--model",
-        required=True,
-        help="Model identifier available through Otari.",
+        default=settings.tr_compiler_model,
+        help="Otari model or routing policy name.",
     )
 
     parser.add_argument(

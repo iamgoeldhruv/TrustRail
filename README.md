@@ -116,6 +116,14 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Added atomic ledger writes alongside transaction status updates.
 - [x] Integrated ledger events with dispatch claiming and startup recovery.
 - [x] Added tests for chain integrity, tampering, append-only enforcement and transaction-ledger atomicity.
+- [x] Extended ledger event models to support both transaction-scoped and run-scoped events.
+- [x] Enforced mutually exclusive event scopes: every event belongs to exactly one transaction or one run.
+- [x] Added migration `005_run_scoped_events.sql` to support run-scoped events while preserving existing transaction-scoped records.
+- [x] Added separate sequence constraints and hash chains for transaction-scoped and run-scoped events.
+- [x] Generalized `LedgerStore` to append, retrieve and verify events using either `txn_id` or `run_id`.
+- [x] Preserved the existing transaction-scoped event hash format for historical compatibility.
+- [x] Preserved append-only guarantees through SQLite update and delete triggers.
+- [x] Added tests for run-scoped event persistence, sequence ordering, chain verification, tampering and foreign-key enforcement.
 
 ### Execution Outcome Classification
 
@@ -276,7 +284,68 @@ The complete generated file contains inactivity overrides for all 10 seeded issu
 - [x] Verified exactly one transaction marker was present on the GitHub issue.
 - [x] Verified the transaction, approval and six ledger events were persisted in SQLite.
 - [x] Verified ledger hash-chain integrity using `LedgerStore.verify_chain()`.
+### Run-Scoped Read-Tool Audit Events
 
+Implemented lightweight audit logging for read-only tools invoked during an agent run.
+
+The `AgentToolDispatcher` is responsible for recording read-tool execution events using the trusted `run_id` supplied by the orchestrator.
+
+Only the following tools generate `READ_TOOL_CALL` events:
+
+- `list_issues`
+- `get_issue`
+
+The `propose_close` tool is intentionally excluded because it creates a proposed transaction rather than performing a read operation.
+
+#### Event contents
+
+Each read-tool event records:
+
+- Tool name.
+- Validated tool arguments.
+- Execution outcome (`SUCCEEDED` or `FAILED`).
+- Safe error metadata when execution fails.
+- Run identifier.
+- Event sequence and hash-chain metadata.
+
+Only validated arguments and minimal execution metadata are persisted. Secrets, authentication tokens and sensitive MCP response data are not included.
+
+#### Execution behavior
+
+- [x] Added read-tool classification in `AgentToolDispatcher`.
+- [x] Added run-scoped `READ_TOOL_CALL` event creation.
+- [x] Logged successful read-tool executions.
+- [x] Logged failed read-tool executions.
+- [x] Used the trusted orchestrator-provided `run_id`, rather than accepting a run identifier from model-generated arguments.
+- [x] Kept `propose_close` outside read-tool audit logging.
+- [x] Prevented successful read results from being returned as normal success when audit persistence fails.
+- [x] Avoided automatic retries of external read operations after audit persistence failures.
+
+#### Production integration
+
+The FastAPI application initializes the shared `LedgerStore` during its lifespan.
+
+The same instance is injected into `AgentToolDispatcher`, ensuring read-tool events use the application's configured SQLite database.
+
+The production dependency flow is:
+
+`FastAPI lifespan → LedgerStore → AgentToolDispatcher → AgentToolHandlers`
+
+The `AgentOrchestrator` supplies the trusted run identifier when dispatching model-requested tool calls.
+
+#### Testing
+
+- [x] Added dispatcher unit tests for read-tool audit behavior.
+- [x] Added SQLite-backed dispatcher integration tests using the actual `LedgerStore`.
+- [x] Verified successful `list_issues` and `get_issue` event persistence.
+- [x] Verified multiple read events receive sequential sequence numbers within a run.
+- [x] Verified run-scoped events persist across database reopening.
+- [x] Verified run-scoped hash-chain integrity.
+- [x] Verified independent event chains for separate runs.
+- [x] Verified failed read operations generate audit events.
+- [x] Verified `propose_close` does not generate `READ_TOOL_CALL` events.
+- [x] Verified audit persistence failures do not expose read results as normal successful responses.
+- [x] Verified no automatic external read retry occurs after audit persistence failure.
 **Verified demonstration:**
 
 | Attribute | Result |
@@ -324,7 +393,21 @@ The complete generated file contains inactivity overrides for all 10 seeded issu
 - [x] Added a structured compiler response containing both the validated policy and its generated summary.
 - [x] Extended real Otari integration tests to verify summary accuracy for clear and adversarial policy requests.
 - [x] Verified all three compiler scenarios (clear, ambiguous and adversarial), with summary validation passing for successful compilations.
+#### Production API Integration
 
+- [x] Added `POST /api/v1/policies/compile` through `app/api/routes/policy_compilation.py`.
+- [x] Added strict request validation using Pydantic with `extra="forbid"`.
+- [x] Integrated `PolicyCompiler` into the FastAPI application lifespan.
+- [x] Configured the production compiler to use `settings.tr_compiler_model`.
+- [x] Reused the shared asynchronous `OtariClient` rather than creating a separate gateway integration.
+- [x] Made policy compilation independent of GitHub MCP server configuration.
+- [x] Added structured handling for successful compilation and ambiguous requests.
+- [x] Added HTTP error mapping for Otari connection, timeout, authentication, API and response errors.
+- [x] Prevented API callers from overriding the configured model or routing policy.
+- [x] Verified successful policy compilation through the production API.
+- [x] Verified ambiguous-request handling and rejection of unexpected request fields.
+
+Policy compilation only produces a validated policy and summary. It does not automatically activate the policy, authorize an action or execute GitHub operations.
 The transaction was independently verified against GitHub and its corresponding database records and audit ledger.
 
 Note: This verifies the successful execution path. It does not establish a universal exactly-once execution guarantee.
@@ -404,7 +487,46 @@ trustrail issues --state all
 # Filter by priority
 trustrail issues --state open --label P1
 ## Running Locally
+### Otari Model Routing Policies
 
+Configured two named routing policies in the Otari dashboard to separate planner and policy-compilation workloads while using a single Otari gateway.
+
+#### Planner routing — `trustrail-planner`
+
+- [x] Created the `trustrail-planner` routing policy in the Otari dashboard.
+- [x] Configured DeepSeek V4 Flash as the cost-efficient default model.
+- [x] Configured DeepSeek V4 Pro 0813 as the stronger `on_failure` fallback.
+- [x] Verified that TrustRail loads the routing policy name through `TR_PLANNER_MODEL`.
+- [x] Integrated the routing policy with `AgentOrchestrator`.
+
+#### Compiler routing — `trustrail-compiler`
+
+- [x] Created the `trustrail-compiler` routing policy in the Otari dashboard.
+- [x] Configured Qwen3-30B-A3B-Instruct-2507 through Nebius as the default model.
+- [x] Configured a DeepSeek V4 Pro 0813 fallback.
+- [x] Verified compiler inference through the Otari gateway using the routing policy name.
+- [x] Integrated the routing policy with `PolicyCompiler`.
+- [x] Verified policy compilation through the production FastAPI endpoint.
+
+#### Application configuration
+
+The application uses Otari routing policy names rather than individual provider/model identifiers:
+
+```env
+TR_PLANNER_MODEL=trustrail-planner
+TR_COMPILER_MODEL=trustrail-compiler
+```
+
+The underlying model and provider selection is managed by Otari. TrustRail does not need provider-specific model selection logic.
+
+Both routing policies use the same Otari chat-completions gateway, demonstrating multi-model and multi-provider routing through a unified integration.
+
+Routing policy names must not contain `:` or `/`.
+
+**Architecture:**
+
+- Planner: DeepSeek V4 Flash → DeepSeek V4 Pro 0813 fallback.
+- Compiler: Qwen3-30B-A3B-Instruct-2507 (Nebius) → DeepSeek V4 Pro 0813 fallback.
 ```bash
 source .venv/bin/activate
 make run
@@ -447,6 +569,7 @@ TrustRail/
 |   │   │       ├── __init__.py
 |   │   │       └── reconciliation.py
 |   |   │       └── dryrun.py
+|   |   │       └── policy_compilation.py
 │   ├── cli/
 │   │   ├── main.py
 │   │   └── commands/
@@ -553,8 +676,9 @@ TrustRail/
 ├── migrations/
 │   ├── 001_initial_schema.sql
 │   ├── 002_transaction_indexes.sql
-│   └── 003_events_append_only.sql
-│   └── 004_authorization_decisions.sql
+│   ├── 003_events_append_only.sql
+│   ├── 004_authorization_decisions.sql
+│   └── 005_run_scoped_events.sql
 ├── scripts/
 │   ├── discover_otari_mcp.py
 │   ├── execute_otari_mcp.py

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
 
     # # AI model configuration
     tr_planner_model: str
+    tr_compiler_model: str
     tr_agent_max_iterations: int = 8
     tr_agent_max_tool_calls: int = 16
     tr_agent_max_completion_tokens: int = 512
