@@ -30,7 +30,7 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["app*", "mcp_github*", "mcp_spike*"]
+include = ["app*", "mcp_github*", "mcp_spike*", "scripts*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

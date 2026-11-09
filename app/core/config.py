@@ -12,6 +12,11 @@ class Settings(BaseSettings):
 
     # # AI model configuration
     tr_planner_model: str
+    tr_compiler_model: str
+    tr_agent_max_iterations: int = 8
+    tr_agent_max_tool_calls: int = 16
+    tr_agent_max_completion_tokens: int = 512
+    tr_agent_token_budget: int = 8192
     # tr_compiler_model: str
 
     # # TrustRail configuration
@@ -23,6 +28,7 @@ class Settings(BaseSettings):
     mcp_github_pat: str
     mcp_github_repo: str
     mcp_admin_token: str
+    otari_agent_api_key: str  # Dedicated agent-run key
     
 
     # # Development configuration

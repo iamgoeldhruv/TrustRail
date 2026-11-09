@@ -21,6 +21,9 @@ def test_migrations_are_applied(tmp_path):
     assert applied == [
         "001_initial_schema.sql",
         "002_transaction_indexes.sql",
+        "003_events_append_only.sql",
+        "004_authorization_decisions.sql",
+        "005_run_scoped_events.sql",
     ]
 
 
@@ -39,7 +42,7 @@ def test_migrations_are_not_applied_twice(tmp_path):
         migrations_dir=DEFAULT_MIGRATIONS_DIR,
     )
 
-    assert len(first_run) == 2
+    assert len(first_run) == 5
     assert second_run == []
 
 

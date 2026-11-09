@@ -262,3 +262,88 @@ def test_recover_on_start_is_idempotent(
 
     assert updated is not None
     assert updated.status == TransactionState.INDETERMINATE
+
+def test_create_transaction_appends_initial_ledger_event(
+    store,
+    create_transaction,
+):
+    transaction = create_transaction()
+
+    events = store.ledger_store.get_events(transaction.id)
+
+    assert len(events) == 1
+
+    event = events[0]
+
+    assert event.type == "TRANSACTION_PROPOSED"
+    assert event.txn_id == transaction.id
+    assert event.seq == 1
+    assert event.payload == {
+        "run_id": transaction.run_id,
+        "policy_id": transaction.policy_id,
+        "policy_version": transaction.policy_version,
+        "tool": transaction.tool,
+        "initial_status": transaction.status.value,
+    }
+
+    verification = store.ledger_store.verify_chain(transaction.id)
+    assert verification.valid is True
+
+
+def test_create_transaction_rolls_back_if_ledger_append_fails(
+    store,
+    monkeypatch,
+):
+    # Create parent records required by the transaction foreign keys.
+    with get_connection(store.db_path) as connection:
+        now = datetime.now(UTC).isoformat()
+
+        connection.execute(
+            """
+            INSERT INTO policies (
+                id, version, nl_text, json, status, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("rollback-policy", 1, "Test", "{}", "ACTIVE", now),
+        )
+
+        connection.execute(
+            """
+            INSERT INTO runs (
+                id, policy_id, user_request, planner_model, created_at
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("rollback-run", "rollback-policy", "Test", None, now),
+        )
+
+        connection.commit()
+
+    transaction = TransactionCreate(
+        run_id="rollback-run",
+        policy_id="rollback-policy",
+        policy_version=1,
+        tool="close_issue_with_note",
+        args={"issue_number": 42},
+        args_hash="test-hash",
+        status=TransactionState.PROPOSED,
+    )
+
+    def fail_ledger_append(*args, **kwargs):
+        raise RuntimeError("Simulated ledger failure")
+
+    monkeypatch.setattr(
+        store.ledger_store,
+        "append_event_in_transaction",
+        fail_ledger_append,
+    )
+
+    with pytest.raises(RuntimeError, match="Simulated ledger failure"):
+        store.create_transaction(transaction)
+
+    # The transaction insert must have been rolled back.
+    assert store.get_transaction(transaction.id) is None
+
+    # No ledger event should exist either.
+    assert store.ledger_store.get_events(transaction.id) == []
