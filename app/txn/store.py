@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import json
@@ -40,11 +39,7 @@ def _row_to_transaction(row: sqlite3.Row) -> Transaction:
             args_hash=row["args_hash"],
             status=TransactionState(row["status"]),
             server_revision=row["server_revision"],
-            facts=(
-                json.loads(row["facts_json"])
-                if row["facts_json"] is not None
-                else None
-            ),
+            facts=(json.loads(row["facts_json"]) if row["facts_json"] is not None else None),
             authorization_decision=row["authorization_decision"],
             authorization_reasons=(
                 json.loads(row["authorization_reasons_json"])
@@ -67,9 +62,7 @@ def _row_to_transaction(row: sqlite3.Row) -> Transaction:
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
     except (ValueError, TypeError, json.JSONDecodeError) as exc:
-        raise ValueError(
-            f"Invalid transaction data for {row['id']}"
-        ) from exc
+        raise ValueError(f"Invalid transaction data for {row['id']}") from exc
 
 
 def _append_request_id_json(
@@ -100,7 +93,6 @@ class TransactionStore:
         self.db_path = db_path
         self.ledger_store = LedgerStore(db_path)
 
-    
     def create_transaction(
         self,
         transaction: TransactionCreate,
@@ -113,7 +105,7 @@ class TransactionStore:
 
         with get_connection(self.db_path) as connection:
             try:
-                _=connection.execute("BEGIN IMMEDIATE")
+                _ = connection.execute("BEGIN IMMEDIATE")
 
                 _ = connection.execute(
                     """
@@ -135,11 +127,7 @@ class TransactionStore:
                         transaction.args_hash,
                         transaction.status.value,
                         transaction.server_revision,
-                        (
-                            _json_dumps(transaction.facts)
-                            if transaction.facts is not None
-                            else None
-                        ),
+                        (_json_dumps(transaction.facts) if transaction.facts is not None else None),
                         transaction.authorization_decision,
                         (
                             _json_dumps(transaction.authorization_reasons)
@@ -186,13 +174,10 @@ class TransactionStore:
                 raise
 
         return Transaction(
-            **transaction.model_dump(
-                exclude={"created_at", "updated_at"}
-            ),
+            **transaction.model_dump(exclude={"created_at", "updated_at"}),
             created_at=created_at,
             updated_at=updated_at,
         )
-
 
     def get_transaction(
         self,
@@ -276,6 +261,7 @@ class TransactionStore:
         decision: str,
         reasons: list[str],
         facts: Any,
+        server_revision: str | None = None,
         evaluated_at: datetime,
         target_state: TransactionState,
     ) -> Transaction:
@@ -325,16 +311,21 @@ class TransactionStore:
 
                 transition(current, target_state)
                 now = evaluated_at.astimezone(UTC).isoformat()
-                connection.execute(
+                _ = connection.execute(
                     """
-                    UPDATE transactions
-                    SET status = ?, facts_json = ?, authorization_decision = ?,
-                        authorization_reasons_json = ?, evaluated_at = ?,
+                   UPDATE transactions
+                    SET status = ?,
+                        server_revision = ?,
+                        facts_json = ?,
+                        authorization_decision = ?,
+                        authorization_reasons_json = ?,
+                        evaluated_at = ?,
                         updated_at = ?
                     WHERE id = ?
                     """,
                     (
                         target_state.value,
+                        server_revision,
                         _json_dumps(facts),
                         decision,
                         _json_dumps(reasons),
@@ -343,7 +334,7 @@ class TransactionStore:
                         transaction_id,
                     ),
                 )
-                self.ledger_store.append_event_in_transaction(
+                _ = self.ledger_store.append_event_in_transaction(
                     connection,
                     LedgerEventCreate(
                         txn_id=transaction_id,
@@ -357,6 +348,7 @@ class TransactionStore:
                             "policy_version": row["policy_version"],
                             "facts": facts,
                             "evaluated_at": now,
+                            "server_revision": server_revision,
                         },
                         ts=evaluated_at,
                     ),
@@ -451,10 +443,10 @@ class TransactionStore:
                 raise
 
     def attach_approval(
-    self,
-    transaction_id: UUID | str,
-    approval_id: str,
-) -> None:
+        self,
+        transaction_id: UUID | str,
+        approval_id: str,
+    ) -> None:
         """Attach an approval once; repeated attachment of the same ID is safe."""
         transaction_id = str(transaction_id)
 
@@ -571,9 +563,7 @@ class TransactionStore:
                 connection.rollback()
                 raise
 
-    
     def recover_on_start(self) -> int:
-        
 
         recoverable_states = (
             TransactionState.DISPATCHING,
@@ -651,7 +641,6 @@ class TransactionStore:
             except Exception:
                 connection.rollback()
                 raise
-
 
     def claim_for_reconciliation(
         self,
@@ -759,9 +748,7 @@ class TransactionStore:
         }
 
         if target_state not in valid_outcomes:
-            raise ValueError(
-                f"Invalid reconciliation outcome: {target_state}"
-            )
+            raise ValueError(f"Invalid reconciliation outcome: {target_state}")
 
         with get_connection(self.db_path) as connection:
             try:
@@ -863,9 +850,7 @@ class TransactionStore:
             TransactionState.INDETERMINATE,
             TransactionState.UNRESOLVED,
         }:
-            raise ValueError(
-                f"Invalid reconciliation recovery state: {return_state}"
-            )
+            raise ValueError(f"Invalid reconciliation recovery state: {return_state}")
 
         with get_connection(self.db_path) as connection:
             try:

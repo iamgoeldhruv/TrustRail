@@ -445,19 +445,30 @@ transaction, and ledger paths remain the only route to an actual GitHub write.
 
 ### Proposal evaluation
 
-After a proposal is created, `ProposalEvaluationService` independently loads
-the transaction's policy and retrieves the issue through the read-only
-`list_issues` MCP tool. It passes only validated ground-truth facts to the
-existing deterministic authorization engine; model-provided claims are never
-authorization evidence. The resulting `ALLOW`, `REQUIRES_APPROVAL`, `DENY`, or
-`POLICY_INVALID` decision is stored with its reasons, facts snapshot, policy
-version, and evaluation timestamp.
+After a proposal is created, `ProposalEvaluationService` independently loads the transaction's policy and retrieves the issue through the read-only `list_issues` MCP tool. It passes only validated ground-truth facts to the existing deterministic authorization engine; model-provided claims are never authorization evidence.
 
-Decision persistence is atomic with the transaction status transition and an
-`AUTHORIZATION_DECISION` ledger event. The event includes the action arguments,
-run identifier, policy version, facts, decision, and machine-readable reasons,
-and remains part of the existing hash chain. Proposal evaluation never invokes
-`close_issue_with_note`; approval and execution remain separate workflows.
+The resulting `ALLOW`, `REQUIRES_APPROVAL`, `DENY`, or `POLICY_INVALID` decision is persisted with its reasons, complete facts snapshot, policy version, discovered Otari MCP `server_revision`, and evaluation timestamp.
+
+For `REQUIRES_APPROVAL` decisions, the transaction transitions to `PENDING_APPROVAL`. The persisted facts snapshot includes the verified repository and relevant issue attributes, while `server_revision` records the exact MCP server configuration revision used for the ground-truth facts request.
+
+Decision persistence is atomic with the transaction status transition and an `AUTHORIZATION_DECISION` ledger event. The event records the action arguments, run identifier, policy version, complete facts snapshot, discovered server revision, decision, and machine-readable reasons. These records remain part of the existing hash-chained audit ledger.
+
+Evaluation is idempotent: an already evaluated transaction retains its original authorization decision and evidence rather than being evaluated and persisted again.
+
+No human approval record is created during proposal evaluation. Approval creation and verification remain separate workflows. Proposal evaluation never invokes `close_issue_with_note` or performs a GitHub write.
+**Implementation and verification**
+
+- [x] Implemented `ProposalEvaluationService` for independent proposal evaluation.
+- [x] Retrieved authoritative GitHub issue facts through Otari's read-only `list_issues` MCP tool.
+- [x] Captured the discovered `server_revision` used for the facts request.
+- [x] Persisted the complete facts snapshot, including repository and issue attributes.
+- [x] Persisted `server_revision` alongside the authorization decision.
+- [x] Transitioned `REQUIRES_APPROVAL` decisions to `PENDING_APPROVAL`.
+- [x] Persisted authorization decisions, facts and server revision atomically with the transaction state transition and ledger event.
+- [x] Included the facts snapshot and server revision in the `AUTHORIZATION_DECISION` event.
+- [x] Preserved original authorization evidence on repeated evaluation.
+- [x] Added tests for ground-truth persistence, ledger integrity and evaluation idempotency.
+- [x] Verified both proposal evaluation tests pass.
 Available commands:
 ```bash
 # Compile a policy, run the planner, and evaluate proposals

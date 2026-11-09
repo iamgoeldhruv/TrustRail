@@ -74,10 +74,13 @@ class ProposalEvaluationService:
             )
         facts: Fact | None = None
         fact_snapshot: dict[str, Any] = {}
+        server_revision: str | None = None
 
         if policy is not None:
             try:
-                facts, fact_snapshot = await self._resolve_facts(action.issue_number)
+                facts, fact_snapshot, server_revision = await self._resolve_facts(
+                    action.issue_number
+                )
             except (OtariMCPError, ValidationError, ValueError, ProposalEvaluationError):
                 fact_snapshot = {"error": "ground_truth_facts_unavailable"}
 
@@ -106,7 +109,8 @@ class ProposalEvaluationService:
             transaction.id,
             decision=decision.decision.value,
             reasons=decision.reasons,
-            facts=fact_snapshot if facts is None else facts.model_dump(),
+            facts=fact_snapshot,
+            server_revision=server_revision,
             evaluated_at=datetime.now(UTC),
             target_state=target_state,
         )
@@ -114,7 +118,7 @@ class ProposalEvaluationService:
     async def _resolve_facts(
         self,
         issue_number: int,
-    ) -> tuple[Fact, dict[str, Any]]:
+    ) -> tuple[Fact, dict[str, Any], str]:
         discovery = await self.client.discover(self.server_id)
         tool = next(
             (item for item in discovery.tools if item.name == "list_issues"),
@@ -159,10 +163,14 @@ class ProposalEvaluationService:
             priority=issue.priority,
             inactive_days=issue.inactive_days,
         )
-        return facts, {
-            "repository": issue_facts.repository,
-            **facts.model_dump(),
-        }
+        return (
+            facts,
+            {
+                "repository": issue_facts.repository,
+                **facts.model_dump(),
+            },
+            discovery.server_revision,
+        )
 
     def _load_policy(self, transaction: Transaction) -> Policy | None:
         with get_connection(self.db_path) as connection:
