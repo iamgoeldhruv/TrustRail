@@ -18,6 +18,9 @@ from app.otari.mcp import OtariMCPClient
 from app.policy.compiler import PolicyCompiler
 from app.reconcile.engine import ReconciliationEngine
 from app.txn.store import TransactionStore
+from app.approvals.service import ApprovalService
+from app.approvals.store import ApprovalStore
+from app.api.routes.approvals import router as approvals_router
 
 
 @asynccontextmanager
@@ -29,6 +32,13 @@ async def lifespan(app: FastAPI):
     print(f"Startup recovery completed. Recovered {recovered_count} transaction(s).")
 
     ledger_store = LedgerStore(db_path=settings.tr_db_path)
+    approval_store = ApprovalStore(db_path=settings.tr_db_path)
+
+    app.state.approval_store = approval_store
+    app.state.approval_service = ApprovalService(
+        transaction_store=transaction_store,
+        approval_store=approval_store,
+    )
 
     app.state.transaction_store = transaction_store
     app.state.ledger_store = ledger_store
@@ -105,6 +115,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.include_router(approvals_router)
 app.include_router(reconciliation_router)
 app.include_router(dryrun_router)
 app.include_router(policy_compilation_router)

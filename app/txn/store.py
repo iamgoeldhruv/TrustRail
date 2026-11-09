@@ -220,7 +220,7 @@ class TransactionStore:
 
                 updated_at = _utc_now().isoformat()
 
-                connection.execute(
+                _ = connection.execute(
                     """
                     UPDATE transactions
                     SET status = ?, updated_at = ?
@@ -894,7 +894,7 @@ class TransactionStore:
                     ),
                 )
 
-                self.ledger_store.append_event_in_transaction(
+                _ = self.ledger_store.append_event_in_transaction(
                     connection,
                     LedgerEventCreate(
                         txn_id=transaction_id,
@@ -907,7 +907,7 @@ class TransactionStore:
                     ),
                 )
 
-                self.ledger_store.append_event_in_transaction(
+                _ = self.ledger_store.append_event_in_transaction(
                     connection,
                     LedgerEventCreate(
                         txn_id=transaction_id,

@@ -270,6 +270,13 @@ The complete generated file contains inactivity overrides for all 10 seeded issu
 - [x] Added Otari request ID persistence for transaction execution.
 - [x] Integrated execution outcome classification into the transaction executor.
 - [x] Added approval-store unit tests covering creation, verification, rejection and binding mismatches.
+- [x] Implemented `ApprovalService` to create hash-bound approval decisions.
+- [x] Added `POST /api/v1/transactions/{transaction_id}/approve`.
+- [x] Added `POST /api/v1/transactions/{transaction_id}/reject`.
+- [x] Enforced strict request validation and rejected client-supplied binding hashes.
+- [x] Persisted approval decisions, transaction state changes and ledger events atomically.
+- [x] Added service tests for approval and rejection workflows and invalid transaction states.
+- [x] Added API tests covering successful decisions, missing transactions, conflicts and invalid requests.
 ### Real GitHub Write — End-to-End Verification
 
 - [x] Created a fresh transaction using the active `demo-close-issue-policy` (v1).
