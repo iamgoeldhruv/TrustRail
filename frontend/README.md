@@ -1,16 +1,24 @@
-# React + Vite
+# TrustRail frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The frontend exposes two control-plane screens:
 
-Currently, two official plugins are available:
+- **Run** starts a backend-owned agent run, polls its read-only status, displays
+  persisted ledger activity and proposals, and sends approval/rejection decisions
+  through the transaction API.
+- **Policies** compiles, dry-runs, and explicitly activates policies.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+The Run screen uses these backend endpoints:
 
-## React Compiler
+- `POST /api/v1/runs`
+- `GET /api/v1/runs/{run_id}`
+- `POST /api/v1/transactions/{transaction_id}/approve`
+- `POST /api/v1/transactions/{transaction_id}/reject`
+- `POST /api/v1/transactions/{transaction_id}/retry`
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+The deployment uses fixed Otari routing policies for now: `trustrail-compiler`
+for policy compilation and `trustrail-planner` for agent runs. They are shown
+for visibility only; the user cannot select a model from the frontend.
 
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+Approval is never treated as execution success in the browser. The existing
+backend retry endpoint performs the final policy/fact precheck and owns the
+write outcome, including approval invalidation and indeterminate execution.

@@ -8,5 +8,6 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; }
+body { min-height: 100vh; }
 button, textarea { font: inherit; }
 button { cursor: pointer; }
