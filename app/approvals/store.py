@@ -82,13 +82,13 @@ class ApprovalStore:
                 if row["approval_id"] is not None:
                     raise ValueError("Transaction already has an attached approval")
 
-                existing = connection.execute(
-                    "SELECT id FROM approvals WHERE txn_id = ?",
-                    (approval.txn_id,),
-                ).fetchone()
+                # existing = connection.execute(
+                #     "SELECT id FROM approvals WHERE txn_id = ?",
+                #     (approval.txn_id,),
+                # ).fetchone()
 
-                if existing is not None:
-                    raise ValueError("An approval decision already exists")
+                # if existing is not None:
+                #     raise ValueError("An approval decision already exists")
 
                 target_state = (
                     TransactionState.APPROVED

@@ -43,7 +43,12 @@ class ProposalEvaluationService:
         self.expected_repository = expected_repository
         self.db_path = db_path
 
-    async def evaluate(self, transaction_id: str) -> Transaction:
+    async def evaluate(
+        self,
+        transaction_id: str,
+        *,
+        require_approval: bool = False,
+    ) -> Transaction:
         transaction = self.store.get_transaction(transaction_id)
         if transaction is None:
             raise ProposalEvaluationError("Transaction does not exist")
@@ -79,7 +84,8 @@ class ProposalEvaluationService:
         if policy is not None:
             try:
                 facts, fact_snapshot, server_revision = await self._resolve_facts(
-                    action.issue_number,transaction_id=transaction.id,
+                    action.issue_number,
+                    transaction_id=transaction.id,
                 )
             except (OtariMCPError, ValidationError, ValueError, ProposalEvaluationError):
                 fact_snapshot = {"error": "ground_truth_facts_unavailable"}
@@ -95,6 +101,16 @@ class ProposalEvaluationService:
                 )
             ),
         )
+        if require_approval and decision.decision is DecisionKind.ALLOW:
+            decision = decision.model_copy(
+                update={
+                    "decision": DecisionKind.REQUIRES_APPROVAL,
+                    "reasons": [
+                        *decision.reasons,
+                        "retry_requires_fresh_approval",
+                    ],
+                }
+            )
         if facts is None and decision.reasons == ["facts_unavailable"]:
             decision = decision.model_copy(update={"reasons": ["ground_truth_facts_unavailable"]})
 
@@ -114,17 +130,17 @@ class ProposalEvaluationService:
             evaluated_at=datetime.now(UTC),
             target_state=target_state,
         )
+
     async def _resolve_facts(
-    self,
-    issue_number: int,
-    *,
-    transaction_id: str,
-) -> tuple[Fact, dict[str, Any], str]:
+        self,
+        issue_number: int,
+        *,
+        transaction_id: str,
+    ) -> tuple[Fact, dict[str, Any], str]:
         try:
             discovery = await self.client.discover(self.server_id)
             self.store.record_otari_request_id(
-                transaction_id,
-                getattr(discovery, "otari_request_id", None) or ""
+                transaction_id, getattr(discovery, "otari_request_id", None) or ""
             )
         except OtariMCPError as exc:
             self.store.record_otari_request_id(
@@ -134,8 +150,7 @@ class ProposalEvaluationService:
             raise
 
         self.store.record_otari_request_id(
-            transaction_id,
-            getattr(discovery, "otari_request_id", None) or ""
+            transaction_id, getattr(discovery, "otari_request_id", None) or ""
         )
 
         tool = next(
@@ -155,8 +170,7 @@ class ProposalEvaluationService:
                 client_execution_id=uuid4(),
             )
             self.store.record_otari_request_id(
-                transaction_id,
-                getattr(discovery, "otari_request_id", None) or ""
+                transaction_id, getattr(discovery, "otari_request_id", None) or ""
             )
         except OtariMCPError as exc:
             self.store.record_otari_request_id(
@@ -166,8 +180,7 @@ class ProposalEvaluationService:
             raise
 
         self.store.record_otari_request_id(
-            transaction_id,
-            getattr(discovery, "otari_request_id", None) or ""
+            transaction_id, getattr(discovery, "otari_request_id", None) or ""
         )
 
         if result.isError:

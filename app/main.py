@@ -21,6 +21,8 @@ from app.txn.store import TransactionStore
 from app.approvals.service import ApprovalService
 from app.approvals.store import ApprovalStore
 from app.api.routes.approvals import router as approvals_router
+from app.txn.executor import TransactionExecutor
+from app.api.routes.retry import router as retry_router
 
 
 @asynccontextmanager
@@ -45,6 +47,7 @@ async def lifespan(app: FastAPI):
     app.state.agent_orchestrator = None
     app.state.reconciliation_engine = None
     app.state.policy_compiler = None
+    app.state.transaction_executor = None
 
     # Chat completions are independent of GitHub MCP configuration.
     async with (
@@ -89,6 +92,7 @@ async def lifespan(app: FastAPI):
                     expected_repository=settings.mcp_github_repo,
                     db_path=settings.tr_db_path,
                 )
+                app.state.proposal_evaluator = proposal_evaluator
 
                 app.state.agent_orchestrator = AgentOrchestrator(
                     client=planner_client,
@@ -101,6 +105,14 @@ async def lifespan(app: FastAPI):
                     otari_client=otari_client,
                     server_id=settings.otari_mcp_server_id,
                     expected_repository=settings.mcp_github_repo,
+                )
+                app.state.transaction_executor = TransactionExecutor(
+                    store=transaction_store,
+                    approval_store=approval_store,
+                    otari_client=otari_client,
+                    server_id=settings.otari_mcp_server_id,
+                    expected_repository=settings.mcp_github_repo,
+                    db_path=settings.tr_db_path,
                 )
 
                 yield
@@ -119,7 +131,7 @@ app.include_router(approvals_router)
 app.include_router(reconciliation_router)
 app.include_router(dryrun_router)
 app.include_router(policy_compilation_router)
-
+app.include_router(retry_router)
 
 @app.get("/health")
 async def health_check():

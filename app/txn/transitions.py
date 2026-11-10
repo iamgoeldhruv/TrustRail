@@ -64,7 +64,11 @@ ALLOWED_TRANSITIONS: dict[TransactionState, frozenset[TransactionState]] = {
             TransactionState.DUPLICATE_DETECTED,
         }
     ),
-    TransactionState.NOT_EXECUTED: frozenset(),
+    TransactionState.NOT_EXECUTED: frozenset(
+        {
+            TransactionState.PROPOSED,
+        }
+    ),
     TransactionState.UNRESOLVED: frozenset(
         {
             TransactionState.RECONCILING,

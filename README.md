@@ -89,7 +89,9 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Implemented centralized immutable allowed-transition table.
 - [x] Added transition validation and `InvalidTransitionError`.
 - [x] Added tests for valid and invalid transitions, terminal states and transition-table completeness.
-
+- [x] Added the `FAILED_SAFE` → `PRECHECK` transition for controlled manual retries.
+- [x] Added the `NOT_EXECUTED` → `PROPOSED` transition to initiate fresh authorization.
+- [x] Reused the existing `APPROVED` → `PRECHECK` transition for execution after fresh retry approval.
 ### SQLite Persistence
 
 - [x] Added SQLite connection management with foreign-key enforcement, busy-timeout handling and automatic database-directory creation.
@@ -190,6 +192,34 @@ The GitHub MCP server supports configurable inactivity-day overrides through `de
 - [x] Added automatic generation of `demo-ages.json` through `scripts/seed_sandbox.py`.
 - [x] Mapped actual GitHub issue numbers to their configured inactivity durations.
 - [x] Preserved actual GitHub timestamps as the fallback when an issue has no configured override.
+#### Safe Transaction Retry
+
+Implemented a controlled retry workflow for transactions that are known not to have completed successfully.
+
+**Retry eligibility and behavior**
+
+- [x] Added `POST /api/v1/transactions/{transaction_id}/retry`.
+- [x] Implemented manual retry from `FAILED_SAFE` using the existing approval.
+- [x] Revalidate current policy, GitHub facts and MCP server revision through the existing transaction executor before dispatch.
+- [x] Implemented retry preparation from `NOT_EXECUTED` by clearing the active authorization snapshot and detaching the previous approval.
+- [x] Preserved historical approval records rather than deleting or overwriting them.
+- [x] Re-evaluated policy using fresh GitHub facts for `NOT_EXECUTED` retries.
+- [x] Required a fresh human approval for `NOT_EXECUTED` retries, including when the ordinary policy decision is `ALLOW`.
+- [x] Bound the new approval to the fresh authorization facts, policy content and MCP server revision.
+- [x] Verified that execution after fresh approval follows the existing `APPROVED` → `PRECHECK` → `DISPATCHING` flow.
+- [x] Added atomic retry preparation and attempt-count updates.
+- [x] Recorded retry preparation and execution preparation as hash-chained ledger events.
+- [x] Kept GitHub write execution inside `TransactionExecutor`, preserving its atomic dispatch claim and single-attempt execution behavior.
+
+**Retry safety rules**
+
+- `FAILED_SAFE`: manual retry with the existing approval and fresh PRECHECK.
+- `NOT_EXECUTED`: fresh authorization, fresh human approval and fresh PRECHECK.
+- `PRECHECK`: permits resuming a retry after a recoverable pre-dispatch error.
+- `INDETERMINATE`: cannot be retried directly; reconciliation is required first.
+- `UNRESOLVED` and `DUPLICATE_DETECTED`: cannot be retried directly.
+- `SUCCEEDED` and definitive `FAILED`: are not retryable.
+
 
 The generated JSON follows this structure:
 
@@ -692,6 +722,7 @@ TrustRail/
 |   │   │       └── reconciliation.py
 |   |   │       └── dryrun.py
 |   |   │       └── policy_compilation.py
+├   |   |       |── retry.py
 │   ├── cli/
 │   │   ├── main.py
 │   │   └── commands/
@@ -755,6 +786,7 @@ TrustRail/
 │   │   ├── models.py
 │   │   ├── hashing.py
 │   │   └── store.py
+│   │   └── service.py
 │   ├── ledger/
 │   │   ├── models.py
 │   │   ├── canonical.py
