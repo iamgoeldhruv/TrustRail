@@ -22,16 +22,22 @@ def classify_reconciliation(
             "Evidence transaction ID does not match requested transaction"
         )
 
-    # More than one matching marker means the write was duplicated.
-    if evidence.marker_comment_count > 1:
+    marker_count = (
+        evidence.marker_count
+        if evidence.marker_count is not None
+        else evidence.marker_comment_count
+    )
+
+    # More than one marker occurrence means the write was duplicated.
+    if marker_count > 1:
         return TransactionState.DUPLICATE_DETECTED
 
     # Exactly one marker and a closed issue means the write completed.
-    if evidence.is_closed and evidence.marker_comment_count == 1:
+    if evidence.is_closed and marker_count == 1:
         return TransactionState.SUCCEEDED
 
     # No marker and an open issue means there is no evidence the write ran.
-    if not evidence.is_closed and evidence.marker_comment_count == 0:
+    if not evidence.is_closed and marker_count == 0:
         return TransactionState.NOT_EXECUTED
 
     # All other combinations are ambiguous.

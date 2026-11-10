@@ -5,6 +5,7 @@ from app.txn.executor import (
     TransactionExecutionError,
     TransactionExecutor,
 )
+from app.txn.invalidation import ApprovalInvalidationReason
 from app.txn.models import Transaction, TransactionCreate
 from app.txn.states import TransactionState
 from app.txn.store import TransactionStore
@@ -22,6 +23,7 @@ __all__ = [
     "TransactionExecutor",
     "Transaction",
     "TransactionCreate",
+    "ApprovalInvalidationReason",
     "TransactionStore",
     "ALLOWED_TRANSITIONS",
     "transition",

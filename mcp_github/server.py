@@ -1,44 +1,40 @@
+
 import asyncio
+import hmac
+import json
 import logging
 import os
 import re
+
 from datetime import datetime, timezone
+from pathlib import Path
 
 import uvicorn
+
 from mcp.server import MCPServer
-from pydantic import BaseModel, Field
-
-from mcp_github.client import GitHubClient
-from mcp_github.config import GitHubSettings
-from datetime import datetime, timezone
 from mcp.server.transport_security import TransportSecuritySettings
-import json
-from pathlib import Path
-from mcp_github.middleware import DropResponseMiddleware
-import hmac
 
-from pydantic import ValidationError
-from starlette.applications import Starlette
+from pydantic import BaseModel, Field, ValidationError
+
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
+from starlette.routing import Route
 
 from mcp_github.admin_models import (
     FaultUpdateRequest,
     FaultUpdateResponse,
 )
-from mcp_github.fault_injection import fault_controller
-
-logger = logging.getLogger("trustrail.mcp.github")
-from mcp_github.fault_injection import (
-    FaultMode,
-    fault_controller,
-)
+from mcp_github.client import GitHubClient
+from mcp_github.config import GitHubSettings
 from mcp_github.fault_injection import (
     FaultMode,
     fault_controller,
     mark_response_for_drop,
 )
+from mcp_github.middleware import DropResponseMiddleware
+
+
+logger = logging.getLogger("trustrail.mcp.github")
 
 mcp = MCPServer("TrustRail-GitHub")
 
@@ -51,10 +47,14 @@ def _load_demo_ages(path: Path) -> dict[int, int]:
         with path.open("r", encoding="utf-8") as file:
             data = json.load(file)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid demo ages configuration: {path}") from exc
+        raise ValueError(
+            f"Invalid demo ages configuration: {path}"
+        ) from exc
 
     if not isinstance(data, dict):
-        raise ValueError("Demo ages configuration must be a JSON object.")
+        raise ValueError(
+            "Demo ages configuration must be a JSON object."
+        )
 
     overrides: dict[int, int] = {}
 
@@ -62,13 +62,17 @@ def _load_demo_ages(path: Path) -> dict[int, int]:
         try:
             number = int(issue_number)
         except (TypeError, ValueError) as exc:
-            raise ValueError(f"Invalid issue number in demo ages: {issue_number}") from exc
+            raise ValueError(
+                f"Invalid issue number in demo ages: {issue_number}"
+            ) from exc
 
         if number <= 0:
             raise ValueError("Issue numbers must be positive.")
 
         if type(inactive_days) is not int or inactive_days < 0:
-            raise ValueError(f"Invalid inactive_days value for issue #{number}.")
+            raise ValueError(
+                f"Invalid inactive_days value for issue #{number}."
+            )
 
         overrides[number] = inactive_days
 
@@ -250,12 +254,18 @@ async def get_issue_activity(
 
     async with GitHubClient(settings=settings) as client:
         issue = await client.get_issue(issue_number)
-
         comments = await client.get_issue_comments(issue_number)
 
-    matching_comment_ids = [comment.id for comment in comments if marker in comment.body]
+    matching_comment_ids = [
+        comment.id
+        for comment in comments
+        if marker in comment.body
+    ]
 
-    marker_count = sum(comment.body.count(marker) for comment in comments)
+    marker_count = sum(
+        comment.body.count(marker)
+        for comment in comments
+    )
 
     return IssueActivityResponse(
         repository=settings.mcp_github_repo,
@@ -281,14 +291,12 @@ class CloseIssueResponse(BaseModel):
     comment_url: str | None = None
 
 
-import re
-
-
 @mcp.tool()
 async def close_issue_with_note(
     issue_number: int,
     note: str,
     txn_id: str,
+    demo_allow_duplicate: bool = False,
 ) -> CloseIssueResponse:
     """
     Add a transaction-marked comment and close a GitHub issue.
@@ -298,7 +306,10 @@ async def close_issue_with_note(
     The transaction marker allows TrustRail to reconcile the
     operation if the execution response is lost.
 
-    Never automatically retry this operation.
+    Automatic retries are not performed by this tool.
+
+    demo_allow_duplicate is exclusively for the explicitly
+    enabled naive-executor hackathon demonstration.
     """
 
     if issue_number <= 0:
@@ -317,56 +328,102 @@ async def close_issue_with_note(
         raise ValueError("Invalid transaction ID format.")
 
     if "<!-- trustrail:txn=" in note:
-        raise ValueError("Note cannot contain a TrustRail transaction marker.")
+        raise ValueError(
+            "Note cannot contain a TrustRail transaction marker."
+        )
 
     settings = GitHubSettings()
+
+    # Both conditions are required to activate duplicate behavior:
+    # 1. The individual tool call explicitly opts in.
+    # 2. The server operator enabled the demo environment flag.
+    if demo_allow_duplicate and not settings.trustrail_enable_naive_demo:
+        raise ValueError(
+            "Naive demo duplicate execution is disabled on this server."
+        )
+
+    demo_duplicate_mode = (
+        demo_allow_duplicate
+        and settings.trustrail_enable_naive_demo
+    )
+
+    if demo_duplicate_mode:
+        logger.warning(
+            "NAIVE DEMO MODE: duplicate protection bypass enabled "
+            "for transaction %s on issue #%s",
+            txn_id,
+            issue_number,
+        )
 
     marker = f"<!-- trustrail:txn={txn_id} -->"
     comment_body = f"{note}\n\n{marker}"
 
     async with GitHubClient(settings=settings) as client:
-        # 1. Verify that the issue exists and is currently open.
+        # 1. Verify that the issue exists.
         issue = await client.get_issue(issue_number)
 
-        if issue.state != "open":
-            raise ValueError(f"Issue #{issue_number} is already closed.")
+        # Normal execution must only operate on open issues.
+        # Naive demo retries may encounter the issue already closed
+        # by the first attempt.
+        if issue.state != "open" and not demo_duplicate_mode:
+            raise ValueError(
+                f"Issue #{issue_number} is already closed."
+            )
 
         # 2. Defensive check against an existing transaction marker.
-        # This is not a substitute for TrustRail's dispatch CAS.
+        # This remains mandatory for all normal executions.
         comments = await client.get_issue_comments(issue_number)
 
-        if any(marker in comment.body for comment in comments):
-            raise ValueError(f"Transaction marker already exists for {txn_id}.")
+        marker_already_exists = any(
+            marker in comment.body
+            for comment in comments
+        )
+
+        if marker_already_exists and not demo_duplicate_mode:
+            raise ValueError(
+                f"Transaction marker already exists for {txn_id}."
+            )
 
         # 3. Create the transaction-marked comment.
-        # Do not retry this POST.
+        # Exactly one GitHub comment POST per MCP invocation.
         fault_mode = await fault_controller.consume_mode()
+
         logger.info(
             "Consumed fault mode %s for issue #%s",
             fault_mode.value,
             issue_number,
         )
+
         if fault_mode == FaultMode.FAIL_BEFORE_APPLY:
-            raise RuntimeError("Injected failure before GitHub write.")
+            raise RuntimeError(
+                "Injected failure before GitHub write."
+            )
+
         comment = await client.create_issue_comment(
             issue_number=issue_number,
             body=comment_body,
         )
 
         if fault_mode == FaultMode.PARTIAL:
-            raise RuntimeError("Injected failure after comment creation.")
-        # 4. Close the issue.
-        # If this request fails or its response is lost, the comment
-        # remains as evidence for TrustRail reconciliation.
-        # Do not retry this PATCH.
-        closed_issue = await client.close_issue(issue_number)
+            raise RuntimeError(
+                "Injected failure after comment creation."
+            )
+
+        # 4. Close the issue only if it is still open.
+        # On a naive retry, the first attempt may already have closed it.
+        if issue.state == "open":
+            closed_issue = await client.close_issue(issue_number)
+        else:
+            closed_issue = issue
+
         if fault_mode == FaultMode.DROP_AFTER_APPLY:
             mark_response_for_drop()
+
         if fault_mode == FaultMode.DELAY_AFTER_APPLY:
             await asyncio.sleep(50)
 
     logger.info(
-        "Issue #%s closed for transaction %s",
+        "Issue #%s processed for transaction %s",
         issue_number,
         txn_id,
     )
@@ -420,7 +477,10 @@ async def update_fault_mode(request: Request) -> JSONResponse:
         updated=True,
     )
 
-    logger.info("Admin updated fault mode to %s", fault_request.mode.value)
+    logger.info(
+        "Admin updated fault mode to %s",
+        fault_request.mode.value,
+    )
 
     return JSONResponse(
         status_code=200,

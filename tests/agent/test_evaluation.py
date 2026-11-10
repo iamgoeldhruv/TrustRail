@@ -11,7 +11,44 @@ from app.ledger.store import LedgerStore
 from app.txn.models import TransactionCreate
 from app.txn.states import TransactionState
 from app.txn.store import TransactionStore
+def create_evaluation_test_context(db_path):
+    run_migrations(db_path=db_path)
+    now = datetime.now(UTC).isoformat()
 
+    with get_connection(db_path) as connection:
+        connection.execute(
+            "INSERT INTO policies (id, version, nl_text, json, status, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("policy-1", 1, "policy", json.dumps(POLICY), "ACTIVE", now),
+        )
+        connection.execute(
+            "INSERT INTO runs (id, policy_id, user_request, planner_model, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("run-1", "policy-1", "close issue", "planner", now),
+        )
+        connection.commit()
+
+    store = TransactionStore(db_path)
+
+    transaction = store.create_transaction(TransactionCreate(
+        id="txn-1",
+        run_id="run-1",
+        policy_id="policy-1",
+        policy_version=1,
+        tool="close_issue_with_note",
+        args={"issue_number": 7, "note": "inactive"},
+        args_hash="hash",
+    ))
+
+    service = ProposalEvaluationService(
+        store=store,
+        client=FactsClient(),
+        server_id="server",
+        expected_repository="owner/repo",
+        db_path=db_path,
+    )
+
+    return store, transaction, service
 POLICY = {
     "version": 1,
     "repo": "owner/repo",
@@ -100,3 +137,46 @@ async def test_proposal_evaluation_persists_ground_truth_and_ledger(tmp_path):
     assert events[-2].type == "AUTHORIZATION_DECISION"
     assert events[-2].payload["facts"]["inactive_days"] == 45
     assert LedgerStore(db_path).verify_chain(transaction.id).valid is True
+    assert result.status is TransactionState.PENDING_APPROVAL
+    assert result.authorization_decision == DecisionKind.REQUIRES_APPROVAL.value
+
+    # Complete persisted facts snapshot
+    assert result.facts["repository"] == "owner/repo"
+    assert result.facts["priority"] == "P2"
+    assert result.facts["inactive_days"] == 45
+    assert result.facts["issue_number"] == 7
+
+    # Exact Otari MCP revision used during facts discovery
+    assert result.server_revision == "rev-1"
+
+    events = LedgerStore(db_path).get_events(transaction.id)
+
+    authorization_event = next(
+        event for event in events
+        if event.type == "AUTHORIZATION_DECISION"
+    )
+
+    assert authorization_event.payload["facts"]["repository"] == "owner/repo"
+    assert authorization_event.payload["facts"]["inactive_days"] == 45
+    assert authorization_event.payload["server_revision"] == "rev-1"
+
+    assert LedgerStore(db_path).verify_chain(transaction.id).valid is True
+@pytest.mark.asyncio
+async def test_repeated_evaluation_preserves_original_evidence(tmp_path):
+    db_path = tmp_path / "test.db"
+
+    store, transaction, service = create_evaluation_test_context(db_path)
+
+    first = await service.evaluate(transaction.id)
+    original_events = LedgerStore(db_path).get_events(transaction.id)
+
+    second = await service.evaluate(transaction.id)
+    repeated_events = LedgerStore(db_path).get_events(transaction.id)
+
+    assert first.status is TransactionState.PENDING_APPROVAL
+    assert second.status is TransactionState.PENDING_APPROVAL
+
+    assert second.server_revision == first.server_revision
+    assert second.facts == first.facts
+
+    assert len(repeated_events) == len(original_events)

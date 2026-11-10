@@ -43,7 +43,12 @@ class ProposalEvaluationService:
         self.expected_repository = expected_repository
         self.db_path = db_path
 
-    async def evaluate(self, transaction_id: str) -> Transaction:
+    async def evaluate(
+        self,
+        transaction_id: str,
+        *,
+        require_approval: bool = False,
+    ) -> Transaction:
         transaction = self.store.get_transaction(transaction_id)
         if transaction is None:
             raise ProposalEvaluationError("Transaction does not exist")
@@ -74,10 +79,14 @@ class ProposalEvaluationService:
             )
         facts: Fact | None = None
         fact_snapshot: dict[str, Any] = {}
+        server_revision: str | None = None
 
         if policy is not None:
             try:
-                facts, fact_snapshot = await self._resolve_facts(action.issue_number)
+                facts, fact_snapshot, server_revision = await self._resolve_facts(
+                    action.issue_number,
+                    transaction_id=transaction.id,
+                )
             except (OtariMCPError, ValidationError, ValueError, ProposalEvaluationError):
                 fact_snapshot = {"error": "ground_truth_facts_unavailable"}
 
@@ -92,6 +101,16 @@ class ProposalEvaluationService:
                 )
             ),
         )
+        if require_approval and decision.decision is DecisionKind.ALLOW:
+            decision = decision.model_copy(
+                update={
+                    "decision": DecisionKind.REQUIRES_APPROVAL,
+                    "reasons": [
+                        *decision.reasons,
+                        "retry_requires_fresh_approval",
+                    ],
+                }
+            )
         if facts is None and decision.reasons == ["facts_unavailable"]:
             decision = decision.model_copy(update={"reasons": ["ground_truth_facts_unavailable"]})
 
@@ -106,7 +125,8 @@ class ProposalEvaluationService:
             transaction.id,
             decision=decision.decision.value,
             reasons=decision.reasons,
-            facts=fact_snapshot if facts is None else facts.model_dump(),
+            facts=fact_snapshot,
+            server_revision=server_revision,
             evaluated_at=datetime.now(UTC),
             target_state=target_state,
         )
@@ -114,22 +134,55 @@ class ProposalEvaluationService:
     async def _resolve_facts(
         self,
         issue_number: int,
-    ) -> tuple[Fact, dict[str, Any]]:
-        discovery = await self.client.discover(self.server_id)
+        *,
+        transaction_id: str,
+    ) -> tuple[Fact, dict[str, Any], str]:
+        try:
+            discovery = await self.client.discover(self.server_id)
+            self.store.record_otari_request_id(
+                transaction_id, getattr(discovery, "otari_request_id", None) or ""
+            )
+        except OtariMCPError as exc:
+            self.store.record_otari_request_id(
+                transaction_id,
+                exc.request_id,
+            )
+            raise
+
+        self.store.record_otari_request_id(
+            transaction_id, getattr(discovery, "otari_request_id", None) or ""
+        )
+
         tool = next(
             (item for item in discovery.tools if item.name == "list_issues"),
             None,
         )
+
         if tool is None:
             raise ProposalEvaluationError("Otari does not expose list_issues")
 
-        result = await self.client.execute(
-            server_id=self.server_id,
-            tool_name="list_issues",
-            arguments={"state": "all"},
-            server_revision=discovery.server_revision,
-            client_execution_id=uuid4(),
+        try:
+            result = await self.client.execute(
+                server_id=self.server_id,
+                tool_name="list_issues",
+                arguments={"state": "all"},
+                server_revision=discovery.server_revision,
+                client_execution_id=uuid4(),
+            )
+            self.store.record_otari_request_id(
+                transaction_id, getattr(discovery, "otari_request_id", None) or ""
+            )
+        except OtariMCPError as exc:
+            self.store.record_otari_request_id(
+                transaction_id,
+                exc.request_id,
+            )
+            raise
+
+        self.store.record_otari_request_id(
+            transaction_id, getattr(discovery, "otari_request_id", None) or ""
         )
+
         if result.isError:
             raise ProposalEvaluationError("Ground-truth facts request failed")
 
@@ -139,6 +192,7 @@ class ProposalEvaluationService:
                 result.content,
             )
         )
+
         if issue_facts.repository.casefold() != self.expected_repository.casefold():
             raise ProposalEvaluationError("Facts repository does not match")
 
@@ -146,12 +200,15 @@ class ProposalEvaluationService:
             (item for item in issue_facts.issues if item.number == issue_number),
             None,
         )
+
         if issue is None:
             raise ProposalEvaluationError("Issue was not found")
+
         if issue.state not in {"open", "closed"}:
             raise ProposalEvaluationError("Issue state is invalid")
 
         state = cast(Literal["open", "closed"], issue.state)
+
         facts = Fact(
             issue_number=issue.number,
             state=state,
@@ -159,10 +216,15 @@ class ProposalEvaluationService:
             priority=issue.priority,
             inactive_days=issue.inactive_days,
         )
-        return facts, {
-            "repository": issue_facts.repository,
-            **facts.model_dump(),
-        }
+
+        return (
+            facts,
+            {
+                "repository": issue_facts.repository,
+                **facts.model_dump(),
+            },
+            discovery.server_revision,
+        )
 
     def _load_policy(self, transaction: Transaction) -> Policy | None:
         with get_connection(self.db_path) as connection:

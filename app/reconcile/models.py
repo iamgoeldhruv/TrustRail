@@ -6,7 +6,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.txn.states import TransactionState
 
-
 ReconciliationOutcome = Literal[
     TransactionState.SUCCEEDED,
     TransactionState.NOT_EXECUTED,
@@ -27,6 +26,7 @@ class IssueActivityEvidence(BaseModel):
     total_comments: int = Field(ge=0)
     txn_id: str = Field(min_length=1, max_length=128)
     marker_comment_count: int = Field(ge=0)
+    marker_count: int | None = Field(default=None, ge=0)
     matching_comment_ids: list[int] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -39,6 +39,11 @@ class IssueActivityEvidence(BaseModel):
         if self.marker_comment_count != len(self.matching_comment_ids):
             raise ValueError(
                 "Marker count does not match the matching comment IDs"
+            )
+
+        if self.marker_count is not None and self.marker_count < self.marker_comment_count:
+            raise ValueError(
+                "Marker occurrence count cannot be less than matching comment count"
             )
 
         if len(set(self.matching_comment_ids)) != len(

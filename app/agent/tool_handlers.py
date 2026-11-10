@@ -166,6 +166,7 @@ class AgentToolHandlers:
                 server_revision=discovery.server_revision,
                 client_execution_id=uuid4(),
             )
+            
         except OtariMCPError as exc:
             raise AgentToolError(
                 "Unable to retrieve issues through Otari."

@@ -5,7 +5,7 @@ import hashlib
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from app.approvals.hashing import approval_binding_hash
+from app.approvals.hashing import approval_binding_hash, policy_content_hash
 from app.approvals.models import ApprovalCreate, ApprovalDecision
 from app.approvals.store import ApprovalStore
 from app.core.config import settings
@@ -18,7 +18,6 @@ from app.txn.executor import (
 )
 from app.txn.models import TransactionCreate
 from app.txn.store import TransactionStore
-
 
 POLICY_ID = "demo-close-issue-policy"
 POLICY_VERSION = 1
@@ -141,6 +140,7 @@ async def main() -> None:
             policy_version=pending.policy_version,
             facts_that_matter=facts.model_dump(),
             server_revision=discovery.server_revision,
+            policy_hash=policy_content_hash(executor._load_policy(pending)),
         )
 
         approval = approval_store.create(
@@ -149,6 +149,7 @@ async def main() -> None:
                 approver="manual-demo-operator",
                 decision=ApprovalDecision.APPROVE,
                 binding_hash=binding_hash,
+                policy_hash=policy_content_hash(executor._load_policy(pending)),
                 decided_at=datetime.now(UTC),
             )
         )

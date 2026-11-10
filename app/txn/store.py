@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import json
@@ -40,11 +39,7 @@ def _row_to_transaction(row: sqlite3.Row) -> Transaction:
             args_hash=row["args_hash"],
             status=TransactionState(row["status"]),
             server_revision=row["server_revision"],
-            facts=(
-                json.loads(row["facts_json"])
-                if row["facts_json"] is not None
-                else None
-            ),
+            facts=(json.loads(row["facts_json"]) if row["facts_json"] is not None else None),
             authorization_decision=row["authorization_decision"],
             authorization_reasons=(
                 json.loads(row["authorization_reasons_json"])
@@ -57,6 +52,7 @@ def _row_to_transaction(row: sqlite3.Row) -> Transaction:
                 else None
             ),
             approval_id=row["approval_id"],
+            approval_invalidation_reason=row["approval_invalidation_reason"],
             otari_request_ids=(
                 json.loads(row["otari_request_ids_json"])
                 if row["otari_request_ids_json"] is not None
@@ -67,9 +63,7 @@ def _row_to_transaction(row: sqlite3.Row) -> Transaction:
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
     except (ValueError, TypeError, json.JSONDecodeError) as exc:
-        raise ValueError(
-            f"Invalid transaction data for {row['id']}"
-        ) from exc
+        raise ValueError(f"Invalid transaction data for {row['id']}") from exc
 
 
 def _append_request_id_json(
@@ -100,7 +94,6 @@ class TransactionStore:
         self.db_path = db_path
         self.ledger_store = LedgerStore(db_path)
 
-    
     def create_transaction(
         self,
         transaction: TransactionCreate,
@@ -113,7 +106,7 @@ class TransactionStore:
 
         with get_connection(self.db_path) as connection:
             try:
-                _=connection.execute("BEGIN IMMEDIATE")
+                _ = connection.execute("BEGIN IMMEDIATE")
 
                 _ = connection.execute(
                     """
@@ -122,8 +115,8 @@ class TransactionStore:
                         args_hash, status, server_revision, facts_json,
                         authorization_decision, authorization_reasons_json,
                         evaluated_at, approval_id, otari_request_ids_json,
-                        attempt, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        approval_invalidation_reason, attempt, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         str(transaction.id),
@@ -135,11 +128,7 @@ class TransactionStore:
                         transaction.args_hash,
                         transaction.status.value,
                         transaction.server_revision,
-                        (
-                            _json_dumps(transaction.facts)
-                            if transaction.facts is not None
-                            else None
-                        ),
+                        (_json_dumps(transaction.facts) if transaction.facts is not None else None),
                         transaction.authorization_decision,
                         (
                             _json_dumps(transaction.authorization_reasons)
@@ -152,6 +141,7 @@ class TransactionStore:
                             else None
                         ),
                         transaction.approval_id,
+                        transaction.approval_invalidation_reason,
                         (
                             _json_dumps(transaction.otari_request_ids)
                             if transaction.otari_request_ids is not None
@@ -186,13 +176,10 @@ class TransactionStore:
                 raise
 
         return Transaction(
-            **transaction.model_dump(
-                exclude={"created_at", "updated_at"}
-            ),
+            **transaction.model_dump(exclude={"created_at", "updated_at"}),
             created_at=created_at,
             updated_at=updated_at,
         )
-
 
     def get_transaction(
         self,
@@ -235,7 +222,7 @@ class TransactionStore:
 
                 updated_at = _utc_now().isoformat()
 
-                connection.execute(
+                _ = connection.execute(
                     """
                     UPDATE transactions
                     SET status = ?, updated_at = ?
@@ -276,6 +263,7 @@ class TransactionStore:
         decision: str,
         reasons: list[str],
         facts: Any,
+        server_revision: str | None = None,
         evaluated_at: datetime,
         target_state: TransactionState,
     ) -> Transaction:
@@ -325,16 +313,21 @@ class TransactionStore:
 
                 transition(current, target_state)
                 now = evaluated_at.astimezone(UTC).isoformat()
-                connection.execute(
+                _ = connection.execute(
                     """
-                    UPDATE transactions
-                    SET status = ?, facts_json = ?, authorization_decision = ?,
-                        authorization_reasons_json = ?, evaluated_at = ?,
+                   UPDATE transactions
+                    SET status = ?,
+                        server_revision = ?,
+                        facts_json = ?,
+                        authorization_decision = ?,
+                        authorization_reasons_json = ?,
+                        evaluated_at = ?,
                         updated_at = ?
                     WHERE id = ?
                     """,
                     (
                         target_state.value,
+                        server_revision,
                         _json_dumps(facts),
                         decision,
                         _json_dumps(reasons),
@@ -343,7 +336,7 @@ class TransactionStore:
                         transaction_id,
                     ),
                 )
-                self.ledger_store.append_event_in_transaction(
+                _ = self.ledger_store.append_event_in_transaction(
                     connection,
                     LedgerEventCreate(
                         txn_id=transaction_id,
@@ -357,6 +350,7 @@ class TransactionStore:
                             "policy_version": row["policy_version"],
                             "facts": facts,
                             "evaluated_at": now,
+                            "server_revision": server_revision,
                         },
                         ts=evaluated_at,
                     ),
@@ -450,11 +444,87 @@ class TransactionStore:
                 connection.rollback()
                 raise
 
+    def record_naive_demo_attempt(
+        self,
+        transaction_id: UUID | str,
+        *,
+        attempt: int,
+        max_attempts: int,
+        client_execution_id: UUID,
+        outcome: str,
+        otari_request_id: str | None,
+        demo_allow_duplicate: bool,
+    ) -> None:
+        """Record one explicitly requested naive-demo execution attempt."""
+        if not 1 <= attempt <= max_attempts:
+            raise ValueError("Invalid naive demo attempt number")
+
+        transaction_id = str(transaction_id)
+
+        with get_connection(self.db_path) as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+
+                row = connection.execute(
+                    "SELECT * FROM transactions WHERE id = ?",
+                    (transaction_id,),
+                ).fetchone()
+
+                if row is None:
+                    raise TransactionNotFoundError(transaction_id)
+
+                if TransactionState(row["status"]) is not TransactionState.DISPATCHING:
+                    raise ValueError(
+                        "Naive demo attempts can only be recorded "
+                        "while the transaction is DISPATCHING"
+                    )
+
+                request_ids_json = _append_request_id_json(
+                    row,
+                    otari_request_id,
+                )
+
+                connection.execute(
+                    """
+                    UPDATE transactions
+                    SET otari_request_ids_json = ?, updated_at = ?
+                    WHERE id = ? AND status = ?
+                    """,
+                    (
+                        request_ids_json,
+                        _utc_now().isoformat(),
+                        transaction_id,
+                        TransactionState.DISPATCHING.value,
+                    ),
+                )
+
+                self.ledger_store.append_event_in_transaction(
+                    connection,
+                    LedgerEventCreate(
+                        txn_id=transaction_id,
+                        type="NAIVE_DEMO_EXECUTION_ATTEMPT",
+                        payload={
+                            "attempt": attempt,
+                            "max_attempts": max_attempts,
+                            "client_execution_id": str(client_execution_id),
+                            "outcome": outcome,
+                            "otari_request_id": otari_request_id,
+                            "demo_allow_duplicate": demo_allow_duplicate,
+                        },
+                    ),
+                )
+
+                connection.commit()
+
+            except Exception:
+                connection.rollback()
+                raise
+
     def attach_approval(
-    self,
-    transaction_id: UUID | str,
-    approval_id: str,
-) -> None:
+        self,
+        transaction_id: UUID | str,
+        approval_id: str,
+    ) -> None:
         """Attach an approval once; repeated attachment of the same ID is safe."""
         transaction_id = str(transaction_id)
 
@@ -505,6 +575,181 @@ class TransactionStore:
             except Exception:
                 connection.rollback()
                 raise
+
+    def prepare_not_executed_retry(
+        self,
+        transaction_id: UUID | str,
+    ) -> Transaction:
+        """Reset a NOT_EXECUTED transaction for fresh authorization."""
+        transaction_id = str(transaction_id)
+
+        with get_connection(self.db_path) as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+
+                row = connection.execute(
+                    "SELECT * FROM transactions WHERE id = ?",
+                    (transaction_id,),
+                ).fetchone()
+
+                if row is None:
+                    raise TransactionNotFoundError(transaction_id)
+
+                current_state = TransactionState(row["status"])
+
+                if current_state is not TransactionState.NOT_EXECUTED:
+                    raise ValueError(f"Cannot prepare retry from {current_state.value}")
+
+                next_state = transition(
+                    current_state,
+                    TransactionState.PROPOSED,
+                )
+
+                old_approval_id = row["approval_id"]
+                updated_at = _utc_now().isoformat()
+
+                cursor = connection.execute(
+                    """
+                    UPDATE transactions
+                    SET status = ?,
+                        approval_id = NULL,
+                        authorization_decision = NULL,
+                        authorization_reasons_json = NULL,
+                        facts_json = NULL,
+                        server_revision = NULL,
+                        evaluated_at = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                    AND status = ?
+                    """,
+                    (
+                        next_state.value,
+                        updated_at,
+                        transaction_id,
+                        current_state.value,
+                    ),
+                )
+
+                if cursor.rowcount != 1:
+                    raise ValueError("Failed to prepare NOT_EXECUTED retry")
+
+                self.ledger_store.append_event_in_transaction(
+                    connection,
+                    LedgerEventCreate(
+                        txn_id=transaction_id,
+                        type="TRANSACTION_RETRY_PREPARED",
+                        payload={
+                            "from_status": current_state.value,
+                            "to_status": next_state.value,
+                            "previous_approval_id": old_approval_id,
+                            "reason": "not_executed_fresh_approval_required",
+                        },
+                    ),
+                )
+
+                connection.commit()
+
+            except Exception:
+                connection.rollback()
+                raise
+
+        updated = self.get_transaction(transaction_id)
+
+        if updated is None:
+            raise TransactionNotFoundError(transaction_id)
+
+        return updated
+
+    def prepare_failed_safe_retry(
+        self,
+        transaction_id: UUID | str,
+    ) -> Transaction:
+        """Atomically prepare a FAILED_SAFE transaction for another attempt."""
+        transaction_id = str(transaction_id)
+
+        with get_connection(self.db_path) as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+
+                row = connection.execute(
+                    "SELECT * FROM transactions WHERE id = ?",
+                    (transaction_id,),
+                ).fetchone()
+
+                if row is None:
+                    raise TransactionNotFoundError(transaction_id)
+
+                current_state = TransactionState(row["status"])
+
+                if current_state is not TransactionState.FAILED_SAFE:
+                    raise ValueError(
+                        f"Transaction in state {current_state.value} is not eligible for retry"
+                    )
+
+                if (
+                    row["authorization_decision"] == "REQUIRES_APPROVAL"
+                    and row["approval_id"] is None
+                ):
+                    raise ValueError("Cannot retry: the required approval is missing")
+
+                next_state = transition(
+                    current_state,
+                    TransactionState.PRECHECK,
+                )
+
+                next_attempt = row["attempt"] + 1
+                updated_at = _utc_now().isoformat()
+
+                cursor = connection.execute(
+                    """
+                    UPDATE transactions
+                    SET status = ?,
+                        attempt = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    AND status = ?
+                    AND attempt = ?
+                    """,
+                    (
+                        next_state.value,
+                        next_attempt,
+                        updated_at,
+                        transaction_id,
+                        current_state.value,
+                        row["attempt"],
+                    ),
+                )
+
+                if cursor.rowcount != 1:
+                    raise ValueError("Transaction changed while preparing retry")
+
+                self.ledger_store.append_event_in_transaction(
+                    connection,
+                    LedgerEventCreate(
+                        txn_id=transaction_id,
+                        type="TRANSACTION_RETRY_PREPARED",
+                        payload={
+                            "from_status": current_state.value,
+                            "to_status": next_state.value,
+                            "attempt": next_attempt,
+                            "approval_id": row["approval_id"],
+                            "reason": "failed_safe_manual_retry",
+                        },
+                    ),
+                )
+
+                connection.commit()
+
+            except Exception:
+                connection.rollback()
+                raise
+
+        updated = self.get_transaction(transaction_id)
+
+        if updated is None:
+            raise TransactionNotFoundError(transaction_id)
+
+        return updated
 
     def claim_for_dispatch(
         self,
@@ -571,10 +816,193 @@ class TransactionStore:
                 connection.rollback()
                 raise
 
-    
-    def recover_on_start(self) -> int:
-        
+    def prepare_approved_not_executed_retry(
+        self,
+        transaction_id: UUID | str,
+    ) -> Transaction:
+        """Prepare execution after a fresh NOT_EXECUTED retry approval."""
+        transaction_id = str(transaction_id)
 
+        with get_connection(self.db_path) as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+
+                row = connection.execute(
+                    "SELECT * FROM transactions WHERE id = ?",
+                    (transaction_id,),
+                ).fetchone()
+
+                if row is None:
+                    raise TransactionNotFoundError(transaction_id)
+
+                current_state = TransactionState(row["status"])
+
+                if current_state is not TransactionState.APPROVED:
+                    raise ValueError(f"Cannot prepare retry from {current_state.value}")
+
+                approval_id = row["approval_id"]
+
+                if approval_id is None:
+                    raise ValueError("Fresh retry approval is missing")
+
+                events = connection.execute(
+                    """
+                    SELECT seq, type, payload_json
+                    FROM events
+                    WHERE txn_id = ?
+                    ORDER BY seq ASC
+                    """,
+                    (transaction_id,),
+                ).fetchall()
+
+                latest_retry_seq = None
+                valid_approval = False
+
+                for event in events:
+                    payload = json.loads(event["payload_json"])
+
+                    if (
+                        event["type"] == "TRANSACTION_RETRY_PREPARED"
+                        and payload.get("reason") == "not_executed_fresh_approval_required"
+                    ):
+                        latest_retry_seq = event["seq"]
+                        valid_approval = False
+
+                    elif (
+                        latest_retry_seq is not None
+                        and event["seq"] > latest_retry_seq
+                        and event["type"] == "APPROVAL_DECISION_RECORDED"
+                        and payload.get("approval_id") == approval_id
+                        and payload.get("decision") == "APPROVE"
+                        and payload.get("from_status") == "PENDING_APPROVAL"
+                        and payload.get("to_status") == "APPROVED"
+                    ):
+                        valid_approval = True
+
+                if not valid_approval:
+                    raise ValueError("No fresh approval exists for this NOT_EXECUTED retry")
+
+                next_state = transition(
+                    current_state,
+                    TransactionState.PRECHECK,
+                )
+
+                next_attempt = row["attempt"] + 1
+                updated_at = _utc_now().isoformat()
+
+                cursor = connection.execute(
+                    """
+                    UPDATE transactions
+                    SET status = ?,
+                        attempt = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    AND status = ?
+                    AND approval_id = ?
+                    AND attempt = ?
+                    """,
+                    (
+                        next_state.value,
+                        next_attempt,
+                        updated_at,
+                        transaction_id,
+                        current_state.value,
+                        approval_id,
+                        row["attempt"],
+                    ),
+                )
+
+                if cursor.rowcount != 1:
+                    raise ValueError("Failed to prepare approved retry")
+
+                self.ledger_store.append_event_in_transaction(
+                    connection,
+                    LedgerEventCreate(
+                        txn_id=transaction_id,
+                        type="TRANSACTION_RETRY_EXECUTION_PREPARED",
+                        payload={
+                            "from_status": current_state.value,
+                            "to_status": next_state.value,
+                            "attempt": next_attempt,
+                            "approval_id": approval_id,
+                            "reason": "not_executed_fresh_approval",
+                        },
+                    ),
+                )
+
+                connection.commit()
+
+            except Exception:
+                connection.rollback()
+                raise
+
+        updated = self.get_transaction(transaction_id)
+
+        if updated is None:
+            raise TransactionNotFoundError(transaction_id)
+
+        return updated
+
+    def invalidate_approval(
+        self,
+        transaction_id: UUID | str,
+        reason: str,
+    ) -> Transaction:
+        """Atomically transition PRECHECK to APPROVAL_INVALIDATED and audit it."""
+        from app.txn.invalidation import ApprovalInvalidationReason
+
+        transaction_id = str(transaction_id)
+        invalidation_reason = ApprovalInvalidationReason(reason)
+        with get_connection(self.db_path) as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT status FROM transactions WHERE id = ?",
+                    (transaction_id,),
+                ).fetchone()
+                if row is None:
+                    raise TransactionNotFoundError(transaction_id)
+                current = TransactionState(row["status"])
+                transition(current, TransactionState.APPROVAL_INVALIDATED)
+                cursor = connection.execute(
+                    """
+                    UPDATE transactions
+                    SET status = ?, approval_invalidation_reason = ?, updated_at = ?
+                    WHERE id = ? AND status = ?
+                    """,
+                    (
+                        TransactionState.APPROVAL_INVALIDATED.value,
+                        invalidation_reason.value,
+                        _utc_now().isoformat(),
+                        transaction_id,
+                        TransactionState.PRECHECK.value,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError("Transaction is no longer in PRECHECK")
+                self.ledger_store.append_event_in_transaction(
+                    connection,
+                    LedgerEventCreate(
+                        txn_id=transaction_id,
+                        type="APPROVAL_INVALIDATED",
+                        payload={
+                            "reason": invalidation_reason.value,
+                            "from_status": current.value,
+                            "to_status": TransactionState.APPROVAL_INVALIDATED.value,
+                        },
+                    ),
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+
+        result = self.get_transaction(transaction_id)
+        if result is None:
+            raise TransactionNotFoundError(transaction_id)
+        return result
+
+    def _recover_on_start(self) -> list[str]:
         recoverable_states = (
             TransactionState.DISPATCHING,
             TransactionState.RECONCILING,
@@ -599,11 +1027,12 @@ class TransactionStore:
                     tuple(state.value for state in recoverable_states),
                 ).fetchall()
 
+                recovered_ids: list[str] = []
+
                 for row in rows:
                     transaction_id = row["id"]
                     previous_state = TransactionState(row["status"])
 
-                    # Validate the transition using the central state machine.
                     validated_target = transition(
                         previous_state,
                         target_state,
@@ -623,13 +1052,8 @@ class TransactionStore:
                         ),
                     )
 
-                    # Never append a recovery event unless the status update
-                    # actually succeeded.
                     if cursor.rowcount != 1:
-                        raise RuntimeError(
-                            f"Failed to recover transaction {transaction_id}: "
-                            "status changed unexpectedly"
-                        )
+                        raise RuntimeError(f"Failed to recover transaction {transaction_id}")
 
                     self.ledger_store.append_event_in_transaction(
                         connection,
@@ -644,14 +1068,22 @@ class TransactionStore:
                         ),
                     )
 
-                connection.commit()
+                    recovered_ids.append(transaction_id)
 
-                return len(rows)
+                connection.commit()
+                return recovered_ids
 
             except Exception:
                 connection.rollback()
                 raise
 
+    def recover_on_start(self) -> int:
+        """Recover interrupted transactions and return the count."""
+        return len(self._recover_on_start())
+
+    def recover_on_start_with_ids(self) -> list[str]:
+        """Recover interrupted transactions and return their IDs."""
+        return self._recover_on_start()
 
     def claim_for_reconciliation(
         self,
@@ -759,9 +1191,7 @@ class TransactionStore:
         }
 
         if target_state not in valid_outcomes:
-            raise ValueError(
-                f"Invalid reconciliation outcome: {target_state}"
-            )
+            raise ValueError(f"Invalid reconciliation outcome: {target_state}")
 
         with get_connection(self.db_path) as connection:
             try:
@@ -863,9 +1293,7 @@ class TransactionStore:
             TransactionState.INDETERMINATE,
             TransactionState.UNRESOLVED,
         }:
-            raise ValueError(
-                f"Invalid reconciliation recovery state: {return_state}"
-            )
+            raise ValueError(f"Invalid reconciliation recovery state: {return_state}")
 
         with get_connection(self.db_path) as connection:
             try:
@@ -909,7 +1337,7 @@ class TransactionStore:
                     ),
                 )
 
-                self.ledger_store.append_event_in_transaction(
+                _ = self.ledger_store.append_event_in_transaction(
                     connection,
                     LedgerEventCreate(
                         txn_id=transaction_id,
@@ -922,7 +1350,7 @@ class TransactionStore:
                     ),
                 )
 
-                self.ledger_store.append_event_in_transaction(
+                _ = self.ledger_store.append_event_in_transaction(
                     connection,
                     LedgerEventCreate(
                         txn_id=transaction_id,

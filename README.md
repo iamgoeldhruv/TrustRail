@@ -89,7 +89,9 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Implemented centralized immutable allowed-transition table.
 - [x] Added transition validation and `InvalidTransitionError`.
 - [x] Added tests for valid and invalid transitions, terminal states and transition-table completeness.
-
+- [x] Added the `FAILED_SAFE` → `PRECHECK` transition for controlled manual retries.
+- [x] Added the `NOT_EXECUTED` → `PROPOSED` transition to initiate fresh authorization.
+- [x] Reused the existing `APPROVED` → `PRECHECK` transition for execution after fresh retry approval.
 ### SQLite Persistence
 
 - [x] Added SQLite connection management with foreign-key enforcement, busy-timeout handling and automatic database-directory creation.
@@ -101,9 +103,15 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Integrated migrations into the FastAPI lifespan.
 - [x] Added database migration and persistence tests.
 - [x] Implemented atomic dispatch claiming (`PRECHECK` → `DISPATCHING`) using conditional updates and rows-affected validation.
+- [x] Revalidated approved policy content, facts and MCP revision during PRECHECK, with atomic, ledger-recorded approval invalidation reasons.
 - [x] Added concurrent dispatch-claim tests.
-- [x] Implemented startup recovery (`DISPATCHING` → `INDETERMINATE`).
+- [x] Implemented startup recovery for interrupted transactions (`DISPATCHING` and `RECONCILING` → `INDETERMINATE`).
+- [x] Added `recover_on_start_with_ids()` to return the IDs of transactions recovered during startup.
+- [x] Preserved the existing `recover_on_start()` count-returning interface.
 - [x] Added recovery tests covering multiple transactions, unchanged states and idempotency.
+- [x] Added transaction-level persistence of multiple Otari request IDs.
+- [x] Implemented ordered, duplicate-free accumulation of request IDs per transaction.
+- [x] Persisted request IDs from successful and failed Otari MCP discovery and execution calls whenever an ID is available.
 
 ### Audit Ledger
 
@@ -158,7 +166,14 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Implemented `get_issue_activity` to inspect issue state, comments and transaction marker occurrences for reconciliation.
 - [x] Implemented `reopen_issue()` to reopen GitHub issues.
 - [x] Implemented `delete_issue_comment()` to delete specific issue comments.
-### Reconciliation (Initial Implementation)
+
+- [x] Added explicitly gated `demo_allow_duplicate` support to `close_issue_with_note` for the naive executor demonstration.
+- [x] Added server-side duplicate-mode protection requiring both the request flag and `TRUSTRAIL_ENABLE_NAIVE_DEMO=true`.
+- [x] Preserved normal closed-issue and transaction-marker protections when demo mode is disabled or not explicitly requested.
+- [x] Ensured duplicate-mode retries create a new comment without attempting to close an already-closed issue again.
+- [x] Added dedicated mocked server tests covering demo-mode authorization and duplicate-execution behavior.
+
+### Reconciliation 
 
 - [x] Added typed reconciliation evidence and result models.
 - [x] Implemented reconciliation outcome classification based on GitHub issue state and transaction-marker counts.
@@ -170,12 +185,83 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Preserved Otari Request IDs during reconciliation.
 - [x] Added handling for reconciliation probe failures and restoration of uncertain transaction states.
 - [x] Implemented the reconciliation API endpoint.
+- [x] Wired startup recovery into the FastAPI application lifespan after database migrations.
+- [x] Initialized the reconciliation engine using the active Otari MCP client during application startup.
+- [x] Automatically triggered reconciliation for transactions recovered during the current startup.
+- [x] Used the existing read-only reconciliation engine without re-executing the original GitHub write.
+- [x] Processed recovered transactions independently so one reconciliation failure does not prevent subsequent attempts.
+- [x] Preserved `INDETERMINATE` state when reconciliation cannot obtain sufficient evidence.
+
+### Naive Demo Executor (Comparison Only)
+
+Implemented an explicitly selected, demo-only execution strategy to demonstrate the risks of blindly retrying non-idempotent GitHub operations after an uncertain execution outcome.
+
+The naive executor provides a comparison against TrustRail's secure single-attempt execution path.
+
+**Execution behavior**
+
+- [x] Added an explicit executor selection (`secure` or `naive`) to `TransactionExecutor`.
+- [x] Kept `secure` as the default execution mode.
+- [x] Restricted naive demo execution to `close_issue_with_note`.
+- [x] Implemented a maximum of three total execution attempts: one initial attempt and up to two retries.
+- [x] Retry only when the previous execution outcome is `INDETERMINATE`.
+- [x] Generate a distinct `client_execution_id` for each attempt.
+- [x] Preserve the original approval-bound transaction arguments.
+- [x] Pass `demo_allow_duplicate=true` only on subsequent naive retry attempts.
+- [x] Keep each individual Otari MCP execution request single-attempt, without automatic HTTP retries.
+- [x] Keep the existing secure executor's single-attempt behavior unchanged.
+
+**Duplicate execution demonstration**
+
+The GitHub MCP server supports an explicitly gated duplicate mode for the naive executor.
+
+- [x] Added the `demo_allow_duplicate` argument to `close_issue_with_note`.
+- [x] Added the `TRUSTRAIL_ENABLE_NAIVE_DEMO` server configuration flag, disabled by default.
+- [x] Require both the request-level opt-in and server-level configuration to enable duplicate execution.
+- [x] Preserve closed-issue and transaction-marker protections during normal execution.
+- [x] Allow duplicate transaction-marked comments only in explicitly enabled demo mode.
+- [x] Avoid attempting to close an issue again when a naive retry encounters an already-closed issue.
+- [x] Preserve one GitHub comment creation request per MCP invocation.
+
+**Auditability**
+
+- [x] Record individual naive demo execution attempts in the transaction-scoped hash-chained ledger.
+- [x] Record attempt number, maximum attempts, client execution ID, outcome, Otari request ID and duplicate-mode flag.
+- [x] Preserve the existing transaction attempt counter used by the controlled retry workflow.
+
+**Server configuration**
+
+The duplicate-execution demonstration is disabled by default.
+
+Enable it only in the dedicated demo GitHub MCP server environment:
+
+```env
+TRUSTRAIL_ENABLE_NAIVE_DEMO=true
+```
+
+The setting must remain disabled in normal deployments.
+
+**Testing**
+
+- [x] Added server tests for normal execution and duplicate-protection behavior.
+- [x] Verified that a demo request is rejected when the server-level flag is disabled.
+- [x] Verified that enabling the server flag alone does not bypass duplicate protections.
+- [x] Verified that explicitly enabled demo mode permits duplicate comments.
+- [x] Verified that an already-closed issue is not closed again during a naive retry.
+- [x] Verified that each MCP invocation creates at most one comment.
+- [x] Verified all tests in `tests/mcp_github/test_server_naive_demo.py` pass.
+
+**Pending end-to-end verification**
+
+- [ ] Demonstrate the naive executor producing duplicate comments using `drop_after_apply`.
+- [ ] Verify that the secure executor produces only one comment under the same lost-response scenario.
+- [ ] Compare the resulting transaction states, GitHub comments and audit ledger events.
 
 **Pending:**
 
-- [x] Complete end-to-end verification of the real GitHub transaction execution workflow.
+
 - [ ] Complete end-to-end verification of the reconciliation workflow.
-- [ ] Automatically trigger reconciliation for recovered `INDETERMINATE` transactions.
+
 - [ ] Verify the complete lost-response scenario (`drop_after_apply` → `INDETERMINATE` → reconciliation → `SUCCEEDED`).
 - [ ] Verify crash recovery and reconciliation end to end.
 - [ ] Verify duplicate-marker and partial-execution scenarios.
@@ -187,6 +273,34 @@ The GitHub MCP server supports configurable inactivity-day overrides through `de
 - [x] Added automatic generation of `demo-ages.json` through `scripts/seed_sandbox.py`.
 - [x] Mapped actual GitHub issue numbers to their configured inactivity durations.
 - [x] Preserved actual GitHub timestamps as the fallback when an issue has no configured override.
+#### Safe Transaction Retry
+
+Implemented a controlled retry workflow for transactions that are known not to have completed successfully.
+
+**Retry eligibility and behavior**
+
+- [x] Added `POST /api/v1/transactions/{transaction_id}/retry`.
+- [x] Implemented manual retry from `FAILED_SAFE` using the existing approval.
+- [x] Revalidate current policy, GitHub facts and MCP server revision through the existing transaction executor before dispatch.
+- [x] Implemented retry preparation from `NOT_EXECUTED` by clearing the active authorization snapshot and detaching the previous approval.
+- [x] Preserved historical approval records rather than deleting or overwriting them.
+- [x] Re-evaluated policy using fresh GitHub facts for `NOT_EXECUTED` retries.
+- [x] Required a fresh human approval for `NOT_EXECUTED` retries, including when the ordinary policy decision is `ALLOW`.
+- [x] Bound the new approval to the fresh authorization facts, policy content and MCP server revision.
+- [x] Verified that execution after fresh approval follows the existing `APPROVED` → `PRECHECK` → `DISPATCHING` flow.
+- [x] Added atomic retry preparation and attempt-count updates.
+- [x] Recorded retry preparation and execution preparation as hash-chained ledger events.
+- [x] Kept GitHub write execution inside `TransactionExecutor`, preserving its atomic dispatch claim and single-attempt execution behavior.
+
+**Retry safety rules**
+
+- `FAILED_SAFE`: manual retry with the existing approval and fresh PRECHECK.
+- `NOT_EXECUTED`: fresh authorization, fresh human approval and fresh PRECHECK.
+- `PRECHECK`: permits resuming a retry after a recoverable pre-dispatch error.
+- `INDETERMINATE`: cannot be retried directly; reconciliation is required first.
+- `UNRESOLVED` and `DUPLICATE_DETECTED`: cannot be retried directly.
+- `SUCCEEDED` and definitive `FAILED`: are not retryable.
+
 
 The generated JSON follows this structure:
 
@@ -270,6 +384,13 @@ The complete generated file contains inactivity overrides for all 10 seeded issu
 - [x] Added Otari request ID persistence for transaction execution.
 - [x] Integrated execution outcome classification into the transaction executor.
 - [x] Added approval-store unit tests covering creation, verification, rejection and binding mismatches.
+- [x] Implemented `ApprovalService` to create hash-bound approval decisions.
+- [x] Added `POST /api/v1/transactions/{transaction_id}/approve`.
+- [x] Added `POST /api/v1/transactions/{transaction_id}/reject`.
+- [x] Enforced strict request validation and rejected client-supplied binding hashes.
+- [x] Persisted approval decisions, transaction state changes and ledger events atomically.
+- [x] Added service tests for approval and rejection workflows and invalid transaction states.
+- [x] Added API tests covering successful decisions, missing transactions, conflicts and invalid requests.
 ### Real GitHub Write — End-to-End Verification
 
 - [x] Created a fresh transaction using the active `demo-close-issue-policy` (v1).
@@ -284,6 +405,56 @@ The complete generated file contains inactivity overrides for all 10 seeded issu
 - [x] Verified exactly one transaction marker was present on the GitHub issue.
 - [x] Verified the transaction, approval and six ledger events were persisted in SQLite.
 - [x] Verified ledger hash-chain integrity using `LedgerStore.verify_chain()`.
+
+### Lost-response recovery — End-to-End Verification
+
+`scripts/e2e_lost_response_recovery.py` verifies recovery from a response that
+is lost after GitHub has applied the write. It prepares the seeded `issue-04`
+sandbox issue, creates and policy-authorizes a `close_issue_with_note`
+transaction, records an approval through `ApprovalService`, and enables the
+GitHub MCP server's authenticated `drop_after_apply` fault mode. The real
+executor makes one write call; the injected server applies the comment and
+issue close, then drops the response. The transaction therefore progresses
+through:
+
+```text
+APPROVED → DISPATCHING → INDETERMINATE → RECONCILING → SUCCEEDED
+```
+
+Reconciliation uses Otari discovery and only the read-only
+`get_issue_activity` tool. The script independently checks that the issue is
+closed and that the transaction marker occurs in exactly one comment and
+exactly once overall. It also checks that the original write tool was called
+once, reconciliation never called it, the expected ledger events exist, and
+the transaction hash chain verifies.
+
+Prerequisites:
+
+- The sandbox repository is configured through `MCP_GITHUB_REPO` and has the
+  `TRUSTRAIL_ADMIN_TOKEN` and `MCP_GITHUB_PAT` credentials.
+- Otari is configured with `OTARI_BASE_URL`, `OTARI_API_KEY`, and
+  `OTARI_MCP_SERVER_ID`.
+- `MCP_GITHUB_SERVER_URL` points to the GitHub MCP server that exposes
+  `/admin/fault`; the server must accept the configured admin token.
+- The database contains the active `demo-close-issue-policy` v1. The script
+  calls the existing sandbox seeding helper and safely resets the selected
+  seeded issue before verification.
+
+Run it from the repository root:
+
+```bash
+python -m scripts.e2e_lost_response_recovery
+```
+
+The script resets the MCP fault mode to `none` in a `finally` block. It does
+not retry the uncertain write or delete the resulting evidence after the
+verification. **Verification status:** the script was attempted on 2026-11-10. Sandbox
+seeding and reset, transaction creation, policy evaluation, and approval
+completed, but execution stopped before enabling fault injection because
+`MCP_GITHUB_SERVER_URL` was not configured. No GitHub write or successful
+lost-response recovery was claimed. A successful run prints the transaction
+ID, marker, each verification step, and a final success summary. Any failed
+assertion exits non-zero.
 ### Run-Scoped Read-Tool Audit Events
 
 Implemented lightweight audit logging for read-only tools invoked during an agent run.
@@ -445,19 +616,30 @@ transaction, and ledger paths remain the only route to an actual GitHub write.
 
 ### Proposal evaluation
 
-After a proposal is created, `ProposalEvaluationService` independently loads
-the transaction's policy and retrieves the issue through the read-only
-`list_issues` MCP tool. It passes only validated ground-truth facts to the
-existing deterministic authorization engine; model-provided claims are never
-authorization evidence. The resulting `ALLOW`, `REQUIRES_APPROVAL`, `DENY`, or
-`POLICY_INVALID` decision is stored with its reasons, facts snapshot, policy
-version, and evaluation timestamp.
+After a proposal is created, `ProposalEvaluationService` independently loads the transaction's policy and retrieves the issue through the read-only `list_issues` MCP tool. It passes only validated ground-truth facts to the existing deterministic authorization engine; model-provided claims are never authorization evidence.
 
-Decision persistence is atomic with the transaction status transition and an
-`AUTHORIZATION_DECISION` ledger event. The event includes the action arguments,
-run identifier, policy version, facts, decision, and machine-readable reasons,
-and remains part of the existing hash chain. Proposal evaluation never invokes
-`close_issue_with_note`; approval and execution remain separate workflows.
+The resulting `ALLOW`, `REQUIRES_APPROVAL`, `DENY`, or `POLICY_INVALID` decision is persisted with its reasons, complete facts snapshot, policy version, discovered Otari MCP `server_revision`, and evaluation timestamp.
+
+For `REQUIRES_APPROVAL` decisions, the transaction transitions to `PENDING_APPROVAL`. The persisted facts snapshot includes the verified repository and relevant issue attributes, while `server_revision` records the exact MCP server configuration revision used for the ground-truth facts request.
+
+Decision persistence is atomic with the transaction status transition and an `AUTHORIZATION_DECISION` ledger event. The event records the action arguments, run identifier, policy version, complete facts snapshot, discovered server revision, decision, and machine-readable reasons. These records remain part of the existing hash-chained audit ledger.
+
+Evaluation is idempotent: an already evaluated transaction retains its original authorization decision and evidence rather than being evaluated and persisted again.
+
+No human approval record is created during proposal evaluation. Approval creation and verification remain separate workflows. Proposal evaluation never invokes `close_issue_with_note` or performs a GitHub write.
+**Implementation and verification**
+
+- [x] Implemented `ProposalEvaluationService` for independent proposal evaluation.
+- [x] Retrieved authoritative GitHub issue facts through Otari's read-only `list_issues` MCP tool.
+- [x] Captured the discovered `server_revision` used for the facts request.
+- [x] Persisted the complete facts snapshot, including repository and issue attributes.
+- [x] Persisted `server_revision` alongside the authorization decision.
+- [x] Transitioned `REQUIRES_APPROVAL` decisions to `PENDING_APPROVAL`.
+- [x] Persisted authorization decisions, facts and server revision atomically with the transaction state transition and ledger event.
+- [x] Included the facts snapshot and server revision in the `AUTHORIZATION_DECISION` event.
+- [x] Preserved original authorization evidence on repeated evaluation.
+- [x] Added tests for ground-truth persistence, ledger integrity and evaluation idempotency.
+- [x] Verified both proposal evaluation tests pass.
 Available commands:
 ```bash
 # Compile a policy, run the planner, and evaluate proposals
@@ -671,6 +853,7 @@ TrustRail/
 |   │   │       └── reconciliation.py
 |   |   │       └── dryrun.py
 |   |   │       └── policy_compilation.py
+├   |   |       |── retry.py
 │   ├── cli/
 │   │   ├── main.py
 │   │   └── commands/
@@ -734,6 +917,7 @@ TrustRail/
 │   │   ├── models.py
 │   │   ├── hashing.py
 │   │   └── store.py
+│   │   └── service.py
 │   ├── ledger/
 │   │   ├── models.py
 │   │   ├── canonical.py
