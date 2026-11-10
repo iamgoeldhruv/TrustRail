@@ -124,7 +124,7 @@ class ProposalEvaluationService:
             discovery = await self.client.discover(self.server_id)
             self.store.record_otari_request_id(
                 transaction_id,
-                discovery.otari_request_id,
+                getattr(discovery, "otari_request_id", None) or ""
             )
         except OtariMCPError as exc:
             self.store.record_otari_request_id(
@@ -135,7 +135,7 @@ class ProposalEvaluationService:
 
         self.store.record_otari_request_id(
             transaction_id,
-            discovery.otari_request_id,
+            getattr(discovery, "otari_request_id", None) or ""
         )
 
         tool = next(
@@ -156,7 +156,7 @@ class ProposalEvaluationService:
             )
             self.store.record_otari_request_id(
                 transaction_id,
-                discovery.otari_request_id,
+                getattr(discovery, "otari_request_id", None) or ""
             )
         except OtariMCPError as exc:
             self.store.record_otari_request_id(
@@ -167,7 +167,7 @@ class ProposalEvaluationService:
 
         self.store.record_otari_request_id(
             transaction_id,
-            result.otari_request_id,
+            getattr(discovery, "otari_request_id", None) or ""
         )
 
         if result.isError:

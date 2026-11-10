@@ -222,10 +222,7 @@ class ReconciliationEngine:
 
         # Discover the currently configured MCP server.
         discovery = await self.otari_client.discover(self.server_id)
-        self.store.record_otari_request_id(
-            transaction_id,
-            discovery.otari_request_id,
-        )
+
         self.store.record_otari_request_id(
             transaction_id,
             discovery.otari_request_id,
@@ -253,10 +250,10 @@ class ReconciliationEngine:
             server_revision=discovery.server_revision,
             client_execution_id=uuid4(),
         )
-        self.store.record_otari_request_id(
-            transaction_id,
-            discovery.otari_request_id,
-        )
+        # self.store.record_otari_request_id(
+        #     transaction_id,
+        #     discovery.otari_request_id,
+        # )
         request_id = response.otari_request_id
 
         # An MCP tool-level error is not evidence that the original
