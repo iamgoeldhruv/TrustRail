@@ -170,7 +170,7 @@ class ProposalEvaluationService:
                 client_execution_id=uuid4(),
             )
             self.store.record_otari_request_id(
-                transaction_id, getattr(discovery, "otari_request_id", None) or ""
+                transaction_id, getattr(result, "otari_request_id", None) or ""
             )
         except OtariMCPError as exc:
             self.store.record_otari_request_id(
@@ -178,10 +178,6 @@ class ProposalEvaluationService:
                 exc.request_id,
             )
             raise
-
-        self.store.record_otari_request_id(
-            transaction_id, getattr(discovery, "otari_request_id", None) or ""
-        )
 
         if result.isError:
             raise ProposalEvaluationError("Ground-truth facts request failed")

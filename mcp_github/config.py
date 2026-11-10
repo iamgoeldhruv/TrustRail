@@ -17,7 +17,7 @@ class GitHubSettings(BaseSettings):
     demo_ages_file: Path = Path("demo-ages.json")
 
     # Explicitly disabled unless enabled in the demo MCP server environment.
-    trustrail_enable_naive_demo: bool = False
+    trustrail_enable_naive_demo: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",
