@@ -163,6 +163,13 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Implemented `get_issue_activity` to inspect issue state, comments and transaction marker occurrences for reconciliation.
 - [x] Implemented `reopen_issue()` to reopen GitHub issues.
 - [x] Implemented `delete_issue_comment()` to delete specific issue comments.
+
+- [x] Added explicitly gated `demo_allow_duplicate` support to `close_issue_with_note` for the naive executor demonstration.
+- [x] Added server-side duplicate-mode protection requiring both the request flag and `TRUSTRAIL_ENABLE_NAIVE_DEMO=true`.
+- [x] Preserved normal closed-issue and transaction-marker protections when demo mode is disabled or not explicitly requested.
+- [x] Ensured duplicate-mode retries create a new comment without attempting to close an already-closed issue again.
+- [x] Added dedicated mocked server tests covering demo-mode authorization and duplicate-execution behavior.
+
 ### Reconciliation (Initial Implementation)
 
 - [x] Added typed reconciliation evidence and result models.
@@ -175,6 +182,71 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Preserved Otari Request IDs during reconciliation.
 - [x] Added handling for reconciliation probe failures and restoration of uncertain transaction states.
 - [x] Implemented the reconciliation API endpoint.
+
+### Naive Demo Executor (Comparison Only)
+
+Implemented an explicitly selected, demo-only execution strategy to demonstrate the risks of blindly retrying non-idempotent GitHub operations after an uncertain execution outcome.
+
+The naive executor provides a comparison against TrustRail's secure single-attempt execution path.
+
+**Execution behavior**
+
+- [x] Added an explicit executor selection (`secure` or `naive`) to `TransactionExecutor`.
+- [x] Kept `secure` as the default execution mode.
+- [x] Restricted naive demo execution to `close_issue_with_note`.
+- [x] Implemented a maximum of three total execution attempts: one initial attempt and up to two retries.
+- [x] Retry only when the previous execution outcome is `INDETERMINATE`.
+- [x] Generate a distinct `client_execution_id` for each attempt.
+- [x] Preserve the original approval-bound transaction arguments.
+- [x] Pass `demo_allow_duplicate=true` only on subsequent naive retry attempts.
+- [x] Keep each individual Otari MCP execution request single-attempt, without automatic HTTP retries.
+- [x] Keep the existing secure executor's single-attempt behavior unchanged.
+
+**Duplicate execution demonstration**
+
+The GitHub MCP server supports an explicitly gated duplicate mode for the naive executor.
+
+- [x] Added the `demo_allow_duplicate` argument to `close_issue_with_note`.
+- [x] Added the `TRUSTRAIL_ENABLE_NAIVE_DEMO` server configuration flag, disabled by default.
+- [x] Require both the request-level opt-in and server-level configuration to enable duplicate execution.
+- [x] Preserve closed-issue and transaction-marker protections during normal execution.
+- [x] Allow duplicate transaction-marked comments only in explicitly enabled demo mode.
+- [x] Avoid attempting to close an issue again when a naive retry encounters an already-closed issue.
+- [x] Preserve one GitHub comment creation request per MCP invocation.
+
+**Auditability**
+
+- [x] Record individual naive demo execution attempts in the transaction-scoped hash-chained ledger.
+- [x] Record attempt number, maximum attempts, client execution ID, outcome, Otari request ID and duplicate-mode flag.
+- [x] Preserve the existing transaction attempt counter used by the controlled retry workflow.
+
+**Server configuration**
+
+The duplicate-execution demonstration is disabled by default.
+
+Enable it only in the dedicated demo GitHub MCP server environment:
+
+```env
+TRUSTRAIL_ENABLE_NAIVE_DEMO=true
+```
+
+The setting must remain disabled in normal deployments.
+
+**Testing**
+
+- [x] Added server tests for normal execution and duplicate-protection behavior.
+- [x] Verified that a demo request is rejected when the server-level flag is disabled.
+- [x] Verified that enabling the server flag alone does not bypass duplicate protections.
+- [x] Verified that explicitly enabled demo mode permits duplicate comments.
+- [x] Verified that an already-closed issue is not closed again during a naive retry.
+- [x] Verified that each MCP invocation creates at most one comment.
+- [x] Verified all tests in `tests/mcp_github/test_server_naive_demo.py` pass.
+
+**Pending end-to-end verification**
+
+- [ ] Demonstrate the naive executor producing duplicate comments using `drop_after_apply`.
+- [ ] Verify that the secure executor produces only one comment under the same lost-response scenario.
+- [ ] Compare the resulting transaction states, GitHub comments and audit ledger events.
 
 **Pending:**
 

@@ -58,9 +58,12 @@ class TransactionExecutor:
         transaction_id: str,
         *,
         approval_id: str | None = None,
+        executor: Literal["secure", "naive"] = "secure",
     ) -> Transaction:
         transaction = self._require_transaction(transaction_id)
         action = self._action(transaction)
+        if executor not in {"secure", "naive"}:
+            raise TransactionExecutionError("Unsupported executor mode")
 
         if transaction.status is TransactionState.PROPOSED:
             policy = self._load_policy(transaction)
@@ -203,10 +206,27 @@ class TransactionExecutor:
             raise TransactionExecutionError(
                 "Transaction arguments must contain the matching txn_id"
             )
+        if "demo_allow_duplicate" in transaction.args:
+            raise TransactionExecutionError(
+                "demo_allow_duplicate is reserved for the naive demo executor"
+            )
 
+        if executor == "naive" and transaction.tool != "close_issue_with_note":
+            raise TransactionExecutionError(
+                "Naive demo executor only supports close_issue_with_note"
+            )
+
+        
         if not self.store.claim_for_dispatch(transaction.id):
             raise TransactionExecutionError("Transaction dispatch claim failed")
 
+        if executor == "naive":
+            return await self._execute_naive_demo(
+                transaction,
+                dispatch_revision=dispatch_revision,
+            )
+
+        # Existing secure single-attempt execution.
         try:
             dispatch_arguments = dict(transaction.args)
             result = await self.otari_client.execute(
@@ -221,14 +241,19 @@ class TransactionExecutor:
                 result.otari_request_id,
             )
             target_state = classify_execution_outcome(result)
+
         except OtariMCPError as exc:
-            self.store.record_otari_request_id(transaction.id, exc.request_id)
+            self.store.record_otari_request_id(
+                transaction.id,
+                exc.request_id,
+            )
             target_state = classify_execution_outcome(exc)
 
         return self.store.update_transaction_status(
             transaction.id,
             target_state,
         )
+
 
     def _budget_consumed_actions(self, run_id: str) -> int:
         """Count actions that have consumed or reserved run capacity."""
@@ -243,6 +268,62 @@ class TransactionExecutor:
         transactions = self.store.list_transactions(run_id=run_id)
 
         return sum(transaction.status in capacity_states for transaction in transactions)
+
+    async def _execute_naive_demo(
+        self,
+        transaction: Transaction,
+        *,
+        dispatch_revision: str,
+    ) -> Transaction:
+        """Demo-only executor that blindly retries indeterminate outcomes."""
+        max_attempts = 3
+        target_state = TransactionState.INDETERMINATE
+
+        for attempt in range(1, max_attempts + 1):
+            client_execution_id = uuid4()
+
+            dispatch_arguments = dict(transaction.args)
+
+            # The first execution follows normal server-side protections.
+            # Subsequent attempts explicitly activate the demo-only bypass.
+            demo_allow_duplicate = attempt > 1
+
+            if demo_allow_duplicate:
+                dispatch_arguments["demo_allow_duplicate"] = True
+
+            try:
+                result = await self.otari_client.execute(
+                    server_id=self.server_id,
+                    tool_name=transaction.tool,
+                    arguments=dispatch_arguments,
+                    server_revision=dispatch_revision,
+                    client_execution_id=client_execution_id,
+                )
+
+                request_id = result.otari_request_id
+                target_state = classify_execution_outcome(result)
+
+            except OtariMCPError as exc:
+                request_id = exc.request_id
+                target_state = classify_execution_outcome(exc)
+
+            self.store.record_naive_demo_attempt(
+                transaction.id,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                client_execution_id=client_execution_id,
+                outcome=target_state.value,
+                otari_request_id=request_id,
+                demo_allow_duplicate=demo_allow_duplicate,
+            )
+
+            if target_state is not TransactionState.INDETERMINATE:
+                break
+
+        return self.store.update_transaction_status(
+            transaction.id,
+            target_state,
+        )
 
     async def _resolve_facts(
     self,

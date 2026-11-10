@@ -443,6 +443,82 @@ class TransactionStore:
             except Exception:
                 connection.rollback()
                 raise
+    
+    def record_naive_demo_attempt(
+        self,
+        transaction_id: UUID | str,
+        *,
+        attempt: int,
+        max_attempts: int,
+        client_execution_id: UUID,
+        outcome: str,
+        otari_request_id: str | None,
+        demo_allow_duplicate: bool,
+    ) -> None:
+        """Record one explicitly requested naive-demo execution attempt."""
+        if not 1 <= attempt <= max_attempts:
+            raise ValueError("Invalid naive demo attempt number")
+
+        transaction_id = str(transaction_id)
+
+        with get_connection(self.db_path) as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+
+                row = connection.execute(
+                    "SELECT * FROM transactions WHERE id = ?",
+                    (transaction_id,),
+                ).fetchone()
+
+                if row is None:
+                    raise TransactionNotFoundError(transaction_id)
+
+                if TransactionState(row["status"]) is not TransactionState.DISPATCHING:
+                    raise ValueError(
+                        "Naive demo attempts can only be recorded "
+                        "while the transaction is DISPATCHING"
+                    )
+
+                request_ids_json = _append_request_id_json(
+                    row,
+                    otari_request_id,
+                )
+
+                connection.execute(
+                    """
+                    UPDATE transactions
+                    SET otari_request_ids_json = ?, updated_at = ?
+                    WHERE id = ? AND status = ?
+                    """,
+                    (
+                        request_ids_json,
+                        _utc_now().isoformat(),
+                        transaction_id,
+                        TransactionState.DISPATCHING.value,
+                    ),
+                )
+
+                self.ledger_store.append_event_in_transaction(
+                    connection,
+                    LedgerEventCreate(
+                        txn_id=transaction_id,
+                        type="NAIVE_DEMO_EXECUTION_ATTEMPT",
+                        payload={
+                            "attempt": attempt,
+                            "max_attempts": max_attempts,
+                            "client_execution_id": str(client_execution_id),
+                            "outcome": outcome,
+                            "otari_request_id": otari_request_id,
+                            "demo_allow_duplicate": demo_allow_duplicate,
+                        },
+                    ),
+                )
+
+                connection.commit()
+
+            except Exception:
+                connection.rollback()
+                raise
 
     def attach_approval(
         self,
