@@ -256,6 +256,7 @@ async def main() -> None:
         await _set_fault_mode(FaultMode.DROP_AFTER_APPLY)
         _step(4, "Enabled drop_after_apply and dispatching once")
         result = await executor.execute(transaction_id, approval_id=approval.id)
+        print("djdjd",result.status)
         _require(
             result.status is TransactionState.INDETERMINATE,
             f"Expected INDETERMINATE, got {result.status.value}",

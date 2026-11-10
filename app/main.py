@@ -1,15 +1,22 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.agent.dispatcher import AgentToolDispatcher
 from app.agent.evaluation import ProposalEvaluationService
 from app.agent.orchestrator import AgentOrchestrator
 from app.agent.proposal_service import ProposalService
 from app.agent.tool_handlers import AgentToolHandlers
+from app.api.routes.approvals import router as approvals_router
 from app.api.routes.dry_run import router as dryrun_router
 from app.api.routes.policy_compilation import router as policy_compilation_router
+from app.api.routes.policy_management import router as policy_management_router
 from app.api.routes.reconciliation import router as reconciliation_router
+from app.api.routes.retry import router as retry_router
+from app.approvals.service import ApprovalService
+from app.approvals.store import ApprovalStore
 from app.core.config import settings
 from app.db.migrations import run_migrations
 from app.ledger.store import LedgerStore
@@ -17,12 +24,8 @@ from app.otari.client import OtariClient
 from app.otari.mcp import OtariMCPClient
 from app.policy.compiler import PolicyCompiler
 from app.reconcile.engine import ReconciliationEngine
-from app.txn.store import TransactionStore
-from app.approvals.service import ApprovalService
-from app.approvals.store import ApprovalStore
-from app.api.routes.approvals import router as approvals_router
 from app.txn.executor import TransactionExecutor
-from app.api.routes.retry import router as retry_router
+from app.txn.store import TransactionStore
 
 
 @asynccontextmanager
@@ -141,10 +144,28 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+cors_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv(
+        "TRUSTRAIL_FRONTEND_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173",
+    ).split(",")
+    if origin.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Accept", "Content-Type", "Authorization"],
+)
+
 app.include_router(approvals_router)
 app.include_router(reconciliation_router)
 app.include_router(dryrun_router)
 app.include_router(policy_compilation_router)
+app.include_router(policy_management_router)
 app.include_router(retry_router)
 
 

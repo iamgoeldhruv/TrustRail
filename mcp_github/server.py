@@ -1,4 +1,3 @@
-
 import asyncio
 import hmac
 import json
@@ -47,14 +46,10 @@ def _load_demo_ages(path: Path) -> dict[int, int]:
         with path.open("r", encoding="utf-8") as file:
             data = json.load(file)
     except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"Invalid demo ages configuration: {path}"
-        ) from exc
+        raise ValueError(f"Invalid demo ages configuration: {path}") from exc
 
     if not isinstance(data, dict):
-        raise ValueError(
-            "Demo ages configuration must be a JSON object."
-        )
+        raise ValueError("Demo ages configuration must be a JSON object.")
 
     overrides: dict[int, int] = {}
 
@@ -62,17 +57,13 @@ def _load_demo_ages(path: Path) -> dict[int, int]:
         try:
             number = int(issue_number)
         except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"Invalid issue number in demo ages: {issue_number}"
-            ) from exc
+            raise ValueError(f"Invalid issue number in demo ages: {issue_number}") from exc
 
         if number <= 0:
             raise ValueError("Issue numbers must be positive.")
 
         if type(inactive_days) is not int or inactive_days < 0:
-            raise ValueError(
-                f"Invalid inactive_days value for issue #{number}."
-            )
+            raise ValueError(f"Invalid inactive_days value for issue #{number}.")
 
         overrides[number] = inactive_days
 
@@ -256,16 +247,9 @@ async def get_issue_activity(
         issue = await client.get_issue(issue_number)
         comments = await client.get_issue_comments(issue_number)
 
-    matching_comment_ids = [
-        comment.id
-        for comment in comments
-        if marker in comment.body
-    ]
+    matching_comment_ids = [comment.id for comment in comments if marker in comment.body]
 
-    marker_count = sum(
-        comment.body.count(marker)
-        for comment in comments
-    )
+    marker_count = sum(comment.body.count(marker) for comment in comments)
 
     return IssueActivityResponse(
         repository=settings.mcp_github_repo,
@@ -328,9 +312,7 @@ async def close_issue_with_note(
         raise ValueError("Invalid transaction ID format.")
 
     if "<!-- trustrail:txn=" in note:
-        raise ValueError(
-            "Note cannot contain a TrustRail transaction marker."
-        )
+        raise ValueError("Note cannot contain a TrustRail transaction marker.")
 
     settings = GitHubSettings()
 
@@ -338,19 +320,13 @@ async def close_issue_with_note(
     # 1. The individual tool call explicitly opts in.
     # 2. The server operator enabled the demo environment flag.
     if demo_allow_duplicate and not settings.trustrail_enable_naive_demo:
-        raise ValueError(
-            "Naive demo duplicate execution is disabled on this server."
-        )
+        raise ValueError("Naive demo duplicate execution is disabled on this server.")
 
-    demo_duplicate_mode = (
-        demo_allow_duplicate
-        and settings.trustrail_enable_naive_demo
-    )
+    demo_duplicate_mode = demo_allow_duplicate and settings.trustrail_enable_naive_demo
 
     if demo_duplicate_mode:
         logger.warning(
-            "NAIVE DEMO MODE: duplicate protection bypass enabled "
-            "for transaction %s on issue #%s",
+            "NAIVE DEMO MODE: duplicate protection bypass enabled for transaction %s on issue #%s",
             txn_id,
             issue_number,
         )
@@ -366,23 +342,16 @@ async def close_issue_with_note(
         # Naive demo retries may encounter the issue already closed
         # by the first attempt.
         if issue.state != "open" and not demo_duplicate_mode:
-            raise ValueError(
-                f"Issue #{issue_number} is already closed."
-            )
+            raise ValueError(f"Issue #{issue_number} is already closed.")
 
         # 2. Defensive check against an existing transaction marker.
         # This remains mandatory for all normal executions.
         comments = await client.get_issue_comments(issue_number)
 
-        marker_already_exists = any(
-            marker in comment.body
-            for comment in comments
-        )
+        marker_already_exists = any(marker in comment.body for comment in comments)
 
         if marker_already_exists and not demo_duplicate_mode:
-            raise ValueError(
-                f"Transaction marker already exists for {txn_id}."
-            )
+            raise ValueError(f"Transaction marker already exists for {txn_id}.")
 
         # 3. Create the transaction-marked comment.
         # Exactly one GitHub comment POST per MCP invocation.
@@ -395,19 +364,20 @@ async def close_issue_with_note(
         )
 
         if fault_mode == FaultMode.FAIL_BEFORE_APPLY:
-            raise RuntimeError(
-                "Injected failure before GitHub write."
-            )
+            raise RuntimeError("Injected failure before GitHub write.")
 
         comment = await client.create_issue_comment(
             issue_number=issue_number,
             body=comment_body,
         )
+        logger.info(
+            "close_issue_with_note fault mode=%s process=%s",
+            fault_mode.value,
+            os.getpid(),
+        )
 
         if fault_mode == FaultMode.PARTIAL:
-            raise RuntimeError(
-                "Injected failure after comment creation."
-            )
+            raise RuntimeError("Injected failure after comment creation.")
 
         # 4. Close the issue only if it is still open.
         # On a naive retry, the first attempt may already have closed it.
