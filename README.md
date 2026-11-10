@@ -405,6 +405,56 @@ The complete generated file contains inactivity overrides for all 10 seeded issu
 - [x] Verified exactly one transaction marker was present on the GitHub issue.
 - [x] Verified the transaction, approval and six ledger events were persisted in SQLite.
 - [x] Verified ledger hash-chain integrity using `LedgerStore.verify_chain()`.
+
+### Lost-response recovery — End-to-End Verification
+
+`scripts/e2e_lost_response_recovery.py` verifies recovery from a response that
+is lost after GitHub has applied the write. It prepares the seeded `issue-04`
+sandbox issue, creates and policy-authorizes a `close_issue_with_note`
+transaction, records an approval through `ApprovalService`, and enables the
+GitHub MCP server's authenticated `drop_after_apply` fault mode. The real
+executor makes one write call; the injected server applies the comment and
+issue close, then drops the response. The transaction therefore progresses
+through:
+
+```text
+APPROVED → DISPATCHING → INDETERMINATE → RECONCILING → SUCCEEDED
+```
+
+Reconciliation uses Otari discovery and only the read-only
+`get_issue_activity` tool. The script independently checks that the issue is
+closed and that the transaction marker occurs in exactly one comment and
+exactly once overall. It also checks that the original write tool was called
+once, reconciliation never called it, the expected ledger events exist, and
+the transaction hash chain verifies.
+
+Prerequisites:
+
+- The sandbox repository is configured through `MCP_GITHUB_REPO` and has the
+  `TRUSTRAIL_ADMIN_TOKEN` and `MCP_GITHUB_PAT` credentials.
+- Otari is configured with `OTARI_BASE_URL`, `OTARI_API_KEY`, and
+  `OTARI_MCP_SERVER_ID`.
+- `MCP_GITHUB_SERVER_URL` points to the GitHub MCP server that exposes
+  `/admin/fault`; the server must accept the configured admin token.
+- The database contains the active `demo-close-issue-policy` v1. The script
+  calls the existing sandbox seeding helper and safely resets the selected
+  seeded issue before verification.
+
+Run it from the repository root:
+
+```bash
+python -m scripts.e2e_lost_response_recovery
+```
+
+The script resets the MCP fault mode to `none` in a `finally` block. It does
+not retry the uncertain write or delete the resulting evidence after the
+verification. **Verification status:** the script was attempted on 2026-11-10. Sandbox
+seeding and reset, transaction creation, policy evaluation, and approval
+completed, but execution stopped before enabling fault injection because
+`MCP_GITHUB_SERVER_URL` was not configured. No GitHub write or successful
+lost-response recovery was claimed. A successful run prints the transaction
+ID, marker, each verification step, and a final success summary. Any failed
+assertion exits non-zero.
 ### Run-Scoped Read-Tool Audit Events
 
 Implemented lightweight audit logging for read-only tools invoked during an agent run.
