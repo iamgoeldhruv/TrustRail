@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ApiError } from './lib/api/client'
 import { policyApi } from './lib/api/policies'
+import RunScreen from './RunScreen'
 import './App.css'
 
 const EXAMPLE = 'Allow the agent to close stale P2 and P3 issues in the configured repository when they have been inactive for at least 30 days. Require human approval before closing P1 issues. Never close issues with the security label.'
@@ -26,6 +27,7 @@ function App() {
   const [activationError, setActivationError] = useState(null)
   const [activating, setActivating] = useState(false)
   const [active, setActive] = useState(null)
+  const [screen, setScreen] = useState('run')
 
   useEffect(() => {
     policyApi.active().then(setActive).catch(() => {})
@@ -88,9 +90,14 @@ function App() {
     <main className="policy-shell">
       <header className="topbar">
         <div className="brand"><span className="brand-mark">TR</span><span>TrustRail</span></div>
+        <nav className="screen-nav" aria-label="Primary">
+          <button className={screen === 'run' ? 'nav-active' : ''} onClick={() => setScreen('run')}>Run</button>
+          <button className={screen === 'policy' ? 'nav-active' : ''} onClick={() => setScreen('policy')}>Policies</button>
+        </nav>
         <div className="status-pill"><span className="status-dot" /> Authorization console</div>
       </header>
 
+      {screen === 'run' ? <RunScreen /> : <>
       <section className="hero-copy">
         <p className="eyebrow">POLICY MANAGEMENT / CONTROL PLANE</p>
         <h1>Authorise with intention.</h1>
@@ -105,7 +112,7 @@ function App() {
       </section>
 
       <section className="panel editor-panel">
-        <div className="panel-heading"><div><p className="eyebrow">POLICY AUTHORING</p><h2>What should the agent be allowed to do?</h2></div><span className="state-badge">DRAFT</span></div>
+        <div className="panel-heading"><div><p className="eyebrow">POLICY AUTHORING</p><h2>What should the agent be allowed to do?</h2><p className="model-caption">Compiler model <strong>trustrail-compiler</strong></p></div><span className="state-badge">DRAFT</span></div>
         <textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder={EXAMPLE} maxLength={10000} />
         <div className="editor-footer"><span>{description.length.toLocaleString()} / 10,000 characters</span><button className="primary" onClick={compile} disabled={compiling || !description.trim()}>{compiling ? 'Compiling…' : 'Compile policy →'}</button></div>
         <ErrorMessage error={compileError} />
@@ -121,6 +128,7 @@ function App() {
       {readyToReview && <section className="panel dryrun-panel"><div className="panel-heading"><div><p className="eyebrow">READ-ONLY EVALUATION</p><h2>Test against current GitHub facts</h2><p className="muted">No transactions, approvals, writes, or policy changes are created.</p></div><button className="primary" onClick={runDryRun} disabled={runningDryRun}>{runningDryRun ? 'Evaluating…' : 'Run dry-run →'}</button></div><ErrorMessage error={dryRunError} />{dryRun && <><div className="metrics">{[['TOTAL', dryRun.summary.total_issues], ['ALLOW', dryRun.summary.allowed], ['APPROVAL', dryRun.summary.requires_approval], ['DENY', dryRun.summary.denied], ['INVALID', dryRun.summary.policy_invalid]].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div><div className="table-wrap"><table><thead><tr><th>Issue</th><th>Decision</th><th>Reasons</th></tr></thead><tbody>{dryRun.results.map((item) => <tr key={item.issue_number}><td><b>#{item.issue_number}</b><small>{item.title}</small></td><td><DecisionBadge decision={item.decision} /></td><td>{item.reasons.join(' ')}</td></tr>)}</tbody></table></div>{!dryRun.results.length && <p className="empty">No issues matched the returned facts.</p>}</>}</section>}
 
       {readyToReview && <section className="activation-row"><div><p className="eyebrow">EXPLICIT ACTIVATION</p><h2>Make this policy authoritative</h2><p className="muted">Activation changes the policy used by future agent proposals. It never executes a GitHub action.</p>{active?.policy && <p className="active-note">Active version: v{active.version} · {active.policy.repo}</p>}</div><div><button className="primary activate" onClick={activate} disabled={!dryRun || activating}>{activating ? 'Activating…' : dryRun ? `Activate v${compiled.policy.version}` : 'Run dry-run first'}</button><ErrorMessage error={activationError} />{activation && <div className="alert success-alert">Policy v{activation.version} is now active.</div>}</div></section>}
+      </>}
     </main>
   )
 }

@@ -15,6 +15,7 @@ from app.api.routes.policy_compilation import router as policy_compilation_route
 from app.api.routes.policy_management import router as policy_management_router
 from app.api.routes.reconciliation import router as reconciliation_router
 from app.api.routes.retry import router as retry_router
+from app.api.routes.runs import router as runs_router
 from app.approvals.service import ApprovalService
 from app.approvals.store import ApprovalStore
 from app.core.config import settings
@@ -51,6 +52,11 @@ async def lifespan(app: FastAPI):
     app.state.reconciliation_engine = None
     app.state.policy_compiler = None
     app.state.transaction_executor = None
+    app.state.agent_dispatcher = None
+    app.state.proposal_evaluator = None
+    app.state.planner_client = None
+    app.state.run_tasks = {}
+    app.state.settings = settings
 
     # Chat completions are independent of GitHub MCP configuration.
     async with (
@@ -96,6 +102,8 @@ async def lifespan(app: FastAPI):
                     db_path=settings.tr_db_path,
                 )
                 app.state.proposal_evaluator = proposal_evaluator
+                app.state.agent_dispatcher = dispatcher
+                app.state.planner_client = planner_client
 
                 app.state.agent_orchestrator = AgentOrchestrator(
                     client=planner_client,
@@ -167,6 +175,7 @@ app.include_router(dryrun_router)
 app.include_router(policy_compilation_router)
 app.include_router(policy_management_router)
 app.include_router(retry_router)
+app.include_router(runs_router)
 
 
 @app.get("/health")
