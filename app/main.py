@@ -30,9 +30,9 @@ async def lifespan(app: FastAPI):
     run_migrations(db_path=settings.tr_db_path)
 
     transaction_store = TransactionStore(db_path=settings.tr_db_path)
-    recovered_count = transaction_store.recover_on_start()
-    print(f"Startup recovery completed. Recovered {recovered_count} transaction(s).")
+    recovered_ids = transaction_store.recover_on_start_with_ids()
 
+    print(f"Startup recovery completed. Recovered {len(recovered_ids)} transaction(s).")
     ledger_store = LedgerStore(db_path=settings.tr_db_path)
     approval_store = ApprovalStore(db_path=settings.tr_db_path)
 
@@ -106,6 +106,20 @@ async def lifespan(app: FastAPI):
                     server_id=settings.otari_mcp_server_id,
                     expected_repository=settings.mcp_github_repo,
                 )
+                for transaction_id in recovered_ids:
+                    try:
+                        result = await app.state.reconciliation_engine.reconcile(transaction_id)
+
+                        print(
+                            f"Startup reconciliation completed: "
+                            f"{transaction_id} -> {result.outcome.value}"
+                        )
+
+                    except Exception as exc:
+                        print(
+                            f"Startup reconciliation failed for "
+                            f"{transaction_id}: {type(exc).__name__}: {exc}"
+                        )
                 app.state.transaction_executor = TransactionExecutor(
                     store=transaction_store,
                     approval_store=approval_store,
@@ -132,6 +146,7 @@ app.include_router(reconciliation_router)
 app.include_router(dryrun_router)
 app.include_router(policy_compilation_router)
 app.include_router(retry_router)
+
 
 @app.get("/health")
 async def health_check():

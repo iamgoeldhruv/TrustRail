@@ -105,11 +105,14 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Implemented atomic dispatch claiming (`PRECHECK` → `DISPATCHING`) using conditional updates and rows-affected validation.
 - [x] Revalidated approved policy content, facts and MCP revision during PRECHECK, with atomic, ledger-recorded approval invalidation reasons.
 - [x] Added concurrent dispatch-claim tests.
-- [x] Implemented startup recovery (`DISPATCHING` → `INDETERMINATE`).
+- [x] Implemented startup recovery for interrupted transactions (`DISPATCHING` and `RECONCILING` → `INDETERMINATE`).
+- [x] Added `recover_on_start_with_ids()` to return the IDs of transactions recovered during startup.
+- [x] Preserved the existing `recover_on_start()` count-returning interface.
 - [x] Added recovery tests covering multiple transactions, unchanged states and idempotency.
 - [x] Added transaction-level persistence of multiple Otari request IDs.
 - [x] Implemented ordered, duplicate-free accumulation of request IDs per transaction.
 - [x] Persisted request IDs from successful and failed Otari MCP discovery and execution calls whenever an ID is available.
+
 ### Audit Ledger
 
 - [x] Added typed ledger event and verification models.
@@ -170,7 +173,7 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Ensured duplicate-mode retries create a new comment without attempting to close an already-closed issue again.
 - [x] Added dedicated mocked server tests covering demo-mode authorization and duplicate-execution behavior.
 
-### Reconciliation (Initial Implementation)
+### Reconciliation 
 
 - [x] Added typed reconciliation evidence and result models.
 - [x] Implemented reconciliation outcome classification based on GitHub issue state and transaction-marker counts.
@@ -182,6 +185,12 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Preserved Otari Request IDs during reconciliation.
 - [x] Added handling for reconciliation probe failures and restoration of uncertain transaction states.
 - [x] Implemented the reconciliation API endpoint.
+- [x] Wired startup recovery into the FastAPI application lifespan after database migrations.
+- [x] Initialized the reconciliation engine using the active Otari MCP client during application startup.
+- [x] Automatically triggered reconciliation for transactions recovered during the current startup.
+- [x] Used the existing read-only reconciliation engine without re-executing the original GitHub write.
+- [x] Processed recovered transactions independently so one reconciliation failure does not prevent subsequent attempts.
+- [x] Preserved `INDETERMINATE` state when reconciliation cannot obtain sufficient evidence.
 
 ### Naive Demo Executor (Comparison Only)
 
@@ -250,9 +259,9 @@ The setting must remain disabled in normal deployments.
 
 **Pending:**
 
-- [x] Complete end-to-end verification of the real GitHub transaction execution workflow.
+
 - [ ] Complete end-to-end verification of the reconciliation workflow.
-- [ ] Automatically trigger reconciliation for recovered `INDETERMINATE` transactions.
+
 - [ ] Verify the complete lost-response scenario (`drop_after_apply` → `INDETERMINATE` → reconciliation → `SUCCEEDED`).
 - [ ] Verify crash recovery and reconciliation end to end.
 - [ ] Verify duplicate-marker and partial-execution scenarios.

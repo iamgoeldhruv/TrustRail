@@ -443,7 +443,7 @@ class TransactionStore:
             except Exception:
                 connection.rollback()
                 raise
-    
+
     def record_naive_demo_attempt(
         self,
         transaction_id: UUID | str,
@@ -575,10 +575,11 @@ class TransactionStore:
             except Exception:
                 connection.rollback()
                 raise
+
     def prepare_not_executed_retry(
-    self,
-    transaction_id: UUID | str,
-) -> Transaction:
+        self,
+        transaction_id: UUID | str,
+    ) -> Transaction:
         """Reset a NOT_EXECUTED transaction for fresh authorization."""
         transaction_id = str(transaction_id)
 
@@ -597,9 +598,7 @@ class TransactionStore:
                 current_state = TransactionState(row["status"])
 
                 if current_state is not TransactionState.NOT_EXECUTED:
-                    raise ValueError(
-                        f"Cannot prepare retry from {current_state.value}"
-                    )
+                    raise ValueError(f"Cannot prepare retry from {current_state.value}")
 
                 next_state = transition(
                     current_state,
@@ -660,6 +659,7 @@ class TransactionStore:
             raise TransactionNotFoundError(transaction_id)
 
         return updated
+
     def prepare_failed_safe_retry(
         self,
         transaction_id: UUID | str,
@@ -815,7 +815,7 @@ class TransactionStore:
             except Exception:
                 connection.rollback()
                 raise
-    
+
     def prepare_approved_not_executed_retry(
         self,
         transaction_id: UUID | str,
@@ -838,9 +838,7 @@ class TransactionStore:
                 current_state = TransactionState(row["status"])
 
                 if current_state is not TransactionState.APPROVED:
-                    raise ValueError(
-                        f"Cannot prepare retry from {current_state.value}"
-                    )
+                    raise ValueError(f"Cannot prepare retry from {current_state.value}")
 
                 approval_id = row["approval_id"]
 
@@ -865,8 +863,7 @@ class TransactionStore:
 
                     if (
                         event["type"] == "TRANSACTION_RETRY_PREPARED"
-                        and payload.get("reason")
-                        == "not_executed_fresh_approval_required"
+                        and payload.get("reason") == "not_executed_fresh_approval_required"
                     ):
                         latest_retry_seq = event["seq"]
                         valid_approval = False
@@ -883,9 +880,7 @@ class TransactionStore:
                         valid_approval = True
 
                 if not valid_approval:
-                    raise ValueError(
-                        "No fresh approval exists for this NOT_EXECUTED retry"
-                    )
+                    raise ValueError("No fresh approval exists for this NOT_EXECUTED retry")
 
                 next_state = transition(
                     current_state,
@@ -918,9 +913,7 @@ class TransactionStore:
                 )
 
                 if cursor.rowcount != 1:
-                    raise ValueError(
-                        "Failed to prepare approved retry"
-                    )
+                    raise ValueError("Failed to prepare approved retry")
 
                 self.ledger_store.append_event_in_transaction(
                     connection,
@@ -1009,8 +1002,7 @@ class TransactionStore:
             raise TransactionNotFoundError(transaction_id)
         return result
 
-    def recover_on_start(self) -> int:
-
+    def _recover_on_start(self) -> list[str]:
         recoverable_states = (
             TransactionState.DISPATCHING,
             TransactionState.RECONCILING,
@@ -1035,11 +1027,12 @@ class TransactionStore:
                     tuple(state.value for state in recoverable_states),
                 ).fetchall()
 
+                recovered_ids: list[str] = []
+
                 for row in rows:
                     transaction_id = row["id"]
                     previous_state = TransactionState(row["status"])
 
-                    # Validate the transition using the central state machine.
                     validated_target = transition(
                         previous_state,
                         target_state,
@@ -1059,13 +1052,8 @@ class TransactionStore:
                         ),
                     )
 
-                    # Never append a recovery event unless the status update
-                    # actually succeeded.
                     if cursor.rowcount != 1:
-                        raise RuntimeError(
-                            f"Failed to recover transaction {transaction_id}: "
-                            "status changed unexpectedly"
-                        )
+                        raise RuntimeError(f"Failed to recover transaction {transaction_id}")
 
                     self.ledger_store.append_event_in_transaction(
                         connection,
@@ -1080,13 +1068,22 @@ class TransactionStore:
                         ),
                     )
 
-                connection.commit()
+                    recovered_ids.append(transaction_id)
 
-                return len(rows)
+                connection.commit()
+                return recovered_ids
 
             except Exception:
                 connection.rollback()
                 raise
+
+    def recover_on_start(self) -> int:
+        """Recover interrupted transactions and return the count."""
+        return len(self._recover_on_start())
+
+    def recover_on_start_with_ids(self) -> list[str]:
+        """Recover interrupted transactions and return their IDs."""
+        return self._recover_on_start()
 
     def claim_for_reconciliation(
         self,
