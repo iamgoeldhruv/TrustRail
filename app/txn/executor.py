@@ -68,16 +68,14 @@ class TransactionExecutor:
                 transaction.id,
                 TransactionState.VALIDATING,
             )
-            discovery, facts = await self._resolve_facts(action.issue_number)
+            discovery, facts = await self._resolve_facts(
+                action.issue_number, transaction_id=transaction.id
+            )
             decision = evaluate(
                 policy,
                 action,
                 facts,
-                RunState(
-                    budget_consumed_actions=self._budget_consumed_actions(
-                        transaction.run_id
-                    )
-                ),
+                RunState(budget_consumed_actions=self._budget_consumed_actions(transaction.run_id)),
             )
             if decision.decision.value in {"DENY", "POLICY_INVALID"}:
                 return self.store.update_transaction_status(
@@ -95,9 +93,7 @@ class TransactionExecutor:
                     target_state=TransactionState.PENDING_APPROVAL,
                 )
                 if not approval_id:
-                    raise ApprovalRequiredError(
-                        f"Transaction {transaction.id} requires approval"
-                    )
+                    raise ApprovalRequiredError(f"Transaction {transaction.id} requires approval")
             elif decision.decision.value == "ALLOW":
                 transaction = self.store.update_transaction_status(
                     transaction.id,
@@ -155,17 +151,14 @@ class TransactionExecutor:
                     ApprovalInvalidationReason.NOW_DENIED.value,
                 )
             latest_discovery, latest_facts = await self._resolve_facts(
-                action.issue_number
+                action.issue_number,
+                transaction_id=transaction.id,
             )
             current_decision = evaluate(
                 current_policy,
                 action,
                 latest_facts,
-                RunState(
-                    budget_consumed_actions=self._budget_consumed_actions(
-                        transaction.run_id
-                    )
-                ),
+                RunState(budget_consumed_actions=self._budget_consumed_actions(transaction.run_id)),
             )
 
             if current_decision.decision.value in {"DENY", "POLICY_INVALID"}:
@@ -200,17 +193,26 @@ class TransactionExecutor:
             )
             dispatch_revision = latest_discovery.server_revision
         else:
-            latest_discovery, _ = await self._resolve_facts(action.issue_number)
+            latest_discovery, _ = await self._resolve_facts(
+                action.issue_number,
+                transaction_id=transaction.id,
+            )
             dispatch_revision = latest_discovery.server_revision
+
+        if transaction.args.get("txn_id") != transaction.id:
+            raise TransactionExecutionError(
+                "Transaction arguments must contain the matching txn_id"
+            )
 
         if not self.store.claim_for_dispatch(transaction.id):
             raise TransactionExecutionError("Transaction dispatch claim failed")
 
         try:
+            dispatch_arguments = dict(transaction.args)
             result = await self.otari_client.execute(
                 server_id=self.server_id,
                 tool_name=transaction.tool,
-                arguments=transaction.args,
+                arguments=dispatch_arguments,
                 server_revision=dispatch_revision,
                 client_execution_id=uuid4(),
             )
@@ -243,20 +245,52 @@ class TransactionExecutor:
         return sum(transaction.status in capacity_states for transaction in transactions)
 
     async def _resolve_facts(
-        self,
-        issue_number: int,
-    ) -> tuple[Any, Fact]:
-        discovery = await self.otari_client.discover(self.server_id)
+    self,
+    issue_number: int,
+    *,
+    transaction_id: str,
+) -> tuple[Any, Fact]:
+        try:
+            discovery = await self.otari_client.discover(self.server_id)
+            self.store.record_otari_request_id(
+                transaction_id,
+                discovery.otari_request_id,
+            )
+        except OtariMCPError as exc:
+            self.store.record_otari_request_id(
+                transaction_id,
+                exc.request_id,
+            )
+            raise
+
+        self.store.record_otari_request_id(
+            transaction_id,
+            discovery.otari_request_id,
+        )
+
         if "list_issues" not in {tool.name for tool in discovery.tools}:
             raise TransactionExecutionError("Otari does not expose list_issues")
 
-        result = await self.otari_client.execute(
-            server_id=self.server_id,
-            tool_name="list_issues",
-            arguments={"state": "all"},
-            server_revision=discovery.server_revision,
-            client_execution_id=uuid4(),
+        try:
+            result = await self.otari_client.execute(
+                server_id=self.server_id,
+                tool_name="list_issues",
+                arguments={"state": "all"},
+                server_revision=discovery.server_revision,
+                client_execution_id=uuid4(),
+            )
+        except OtariMCPError as exc:
+            self.store.record_otari_request_id(
+                transaction_id,
+                exc.request_id,
+            )
+            raise
+
+        self.store.record_otari_request_id(
+            transaction_id,
+            result.otari_request_id,
         )
+
         if result.isError:
             raise TransactionExecutionError("Otari facts request failed")
 
@@ -266,10 +300,16 @@ class TransactionExecutor:
                 result.content,
             )
         )
+
         if issue_facts.repository != self.expected_repository:
             raise TransactionExecutionError("Facts repository does not match")
+
         try:
-            issue = next(item for item in issue_facts.issues if item.number == issue_number)
+            issue = next(
+                item
+                for item in issue_facts.issues
+                if item.number == issue_number
+            )
         except StopIteration as exc:
             raise TransactionExecutionError("Issue was not found") from exc
 

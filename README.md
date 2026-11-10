@@ -105,7 +105,9 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Added concurrent dispatch-claim tests.
 - [x] Implemented startup recovery (`DISPATCHING` → `INDETERMINATE`).
 - [x] Added recovery tests covering multiple transactions, unchanged states and idempotency.
-
+- [x] Added transaction-level persistence of multiple Otari request IDs.
+- [x] Implemented ordered, duplicate-free accumulation of request IDs per transaction.
+- [x] Persisted request IDs from successful and failed Otari MCP discovery and execution calls whenever an ID is available.
 ### Audit Ledger
 
 - [x] Added typed ledger event and verification models.

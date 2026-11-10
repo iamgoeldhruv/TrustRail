@@ -33,6 +33,7 @@ async def run() -> None:
         try:
             # Step 1: Discover the server and its current revision.
             discovery = await client.discover(server_id)
+            
 
             print("MCP discovery successful")
             print(f"Server ID: {discovery.server_id}")

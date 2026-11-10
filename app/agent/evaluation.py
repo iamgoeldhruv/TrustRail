@@ -79,7 +79,7 @@ class ProposalEvaluationService:
         if policy is not None:
             try:
                 facts, fact_snapshot, server_revision = await self._resolve_facts(
-                    action.issue_number
+                    action.issue_number,transaction_id=transaction.id,
                 )
             except (OtariMCPError, ValidationError, ValueError, ProposalEvaluationError):
                 fact_snapshot = {"error": "ground_truth_facts_unavailable"}
@@ -114,26 +114,62 @@ class ProposalEvaluationService:
             evaluated_at=datetime.now(UTC),
             target_state=target_state,
         )
-
     async def _resolve_facts(
-        self,
-        issue_number: int,
-    ) -> tuple[Fact, dict[str, Any], str]:
-        discovery = await self.client.discover(self.server_id)
+    self,
+    issue_number: int,
+    *,
+    transaction_id: str,
+) -> tuple[Fact, dict[str, Any], str]:
+        try:
+            discovery = await self.client.discover(self.server_id)
+            self.store.record_otari_request_id(
+                transaction_id,
+                discovery.otari_request_id,
+            )
+        except OtariMCPError as exc:
+            self.store.record_otari_request_id(
+                transaction_id,
+                exc.request_id,
+            )
+            raise
+
+        self.store.record_otari_request_id(
+            transaction_id,
+            discovery.otari_request_id,
+        )
+
         tool = next(
             (item for item in discovery.tools if item.name == "list_issues"),
             None,
         )
+
         if tool is None:
             raise ProposalEvaluationError("Otari does not expose list_issues")
 
-        result = await self.client.execute(
-            server_id=self.server_id,
-            tool_name="list_issues",
-            arguments={"state": "all"},
-            server_revision=discovery.server_revision,
-            client_execution_id=uuid4(),
+        try:
+            result = await self.client.execute(
+                server_id=self.server_id,
+                tool_name="list_issues",
+                arguments={"state": "all"},
+                server_revision=discovery.server_revision,
+                client_execution_id=uuid4(),
+            )
+            self.store.record_otari_request_id(
+                transaction_id,
+                discovery.otari_request_id,
+            )
+        except OtariMCPError as exc:
+            self.store.record_otari_request_id(
+                transaction_id,
+                exc.request_id,
+            )
+            raise
+
+        self.store.record_otari_request_id(
+            transaction_id,
+            result.otari_request_id,
         )
+
         if result.isError:
             raise ProposalEvaluationError("Ground-truth facts request failed")
 
@@ -143,6 +179,7 @@ class ProposalEvaluationService:
                 result.content,
             )
         )
+
         if issue_facts.repository.casefold() != self.expected_repository.casefold():
             raise ProposalEvaluationError("Facts repository does not match")
 
@@ -150,12 +187,15 @@ class ProposalEvaluationService:
             (item for item in issue_facts.issues if item.number == issue_number),
             None,
         )
+
         if issue is None:
             raise ProposalEvaluationError("Issue was not found")
+
         if issue.state not in {"open", "closed"}:
             raise ProposalEvaluationError("Issue state is invalid")
 
         state = cast(Literal["open", "closed"], issue.state)
+
         facts = Fact(
             issue_number=issue.number,
             state=state,
@@ -163,6 +203,7 @@ class ProposalEvaluationService:
             priority=issue.priority,
             inactive_days=issue.inactive_days,
         )
+
         return (
             facts,
             {

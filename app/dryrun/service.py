@@ -92,6 +92,7 @@ async def dry_run_policy(
             server_revision=discovery.server_revision,
             client_execution_id=uuid4(),
         )
+        
     except OtariMCPError as exc:
         raise DryRunError("Unable to fetch GitHub issue facts through Otari.") from exc
 

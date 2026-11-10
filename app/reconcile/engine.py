@@ -1,4 +1,3 @@
-
 import json
 from collections.abc import Mapping
 from typing import Any
@@ -93,18 +92,14 @@ class ReconciliationEngine:
         transaction = self.store.get_transaction(transaction_id)
 
         if transaction is None:
-            raise ReconciliationError(
-                f"Transaction {transaction_id} does not exist"
-            )
+            raise ReconciliationError(f"Transaction {transaction_id} does not exist")
 
         # ---------------------------------------------------------
         # 2. Validate the transaction before claiming it.
         # ---------------------------------------------------------
 
         if transaction.tool != SUPPORTED_WRITE_TOOL:
-            raise ReconciliationError(
-                f"Unsupported reconciliation tool: {transaction.tool}"
-            )
+            raise ReconciliationError(f"Unsupported reconciliation tool: {transaction.tool}")
 
         issue_number = self._get_issue_number(transaction.args)
 
@@ -112,9 +107,7 @@ class ReconciliationEngine:
         # 3. Atomically claim reconciliation.
         # ---------------------------------------------------------
 
-        previous_state = self.store.claim_for_reconciliation(
-            transaction_id
-        )
+        previous_state = self.store.claim_for_reconciliation(transaction_id)
 
         if previous_state is None:
             raise ReconciliationError(
@@ -143,8 +136,7 @@ class ReconciliationEngine:
             # Verify the evidence belongs to the configured repository.
             if evidence.repository != self.expected_repository:
                 raise ValueError(
-                    "GitHub evidence repository does not match "
-                    "the configured repository"
+                    "GitHub evidence repository does not match the configured repository"
                 )
 
             # Verify the evidence refers to the persisted issue.
@@ -188,9 +180,7 @@ class ReconciliationEngine:
                 otari_request_id=request_id,
             )
 
-            raise ReconciliationError(
-                f"Reconciliation probe failed: {exc}"
-            ) from exc
+            raise ReconciliationError(f"Reconciliation probe failed: {exc}") from exc
 
         # ---------------------------------------------------------
         # 8. Persist the reconciliation outcome.
@@ -231,21 +221,21 @@ class ReconciliationEngine:
         """
 
         # Discover the currently configured MCP server.
-        discovery = await self.otari_client.discover(
-            self.server_id
+        discovery = await self.otari_client.discover(self.server_id)
+        self.store.record_otari_request_id(
+            transaction_id,
+            discovery.otari_request_id,
+        )
+        self.store.record_otari_request_id(
+            transaction_id,
+            discovery.otari_request_id,
         )
 
         # Verify that the read-only tool is available.
-        available_tools = {
-            self._tool_name(tool)
-            for tool in discovery.tools
-        }
+        available_tools = {self._tool_name(tool) for tool in discovery.tools}
 
         if RECONCILIATION_TOOL not in available_tools:
-            raise ReconciliationError(
-                f"Otari MCP server does not expose "
-                f"{RECONCILIATION_TOOL}"
-            )
+            raise ReconciliationError(f"Otari MCP server does not expose {RECONCILIATION_TOOL}")
 
         # Execute exactly one read-only probe.
         #
@@ -263,7 +253,10 @@ class ReconciliationEngine:
             server_revision=discovery.server_revision,
             client_execution_id=uuid4(),
         )
-
+        self.store.record_otari_request_id(
+            transaction_id,
+            discovery.otari_request_id,
+        )
         request_id = response.otari_request_id
 
         # An MCP tool-level error is not evidence that the original
@@ -277,13 +270,9 @@ class ReconciliationEngine:
 
         # Parse and validate evidence.
         try:
-            evidence_payload = self._extract_structured_content(
-                response
-            )
+            evidence_payload = self._extract_structured_content(response)
 
-            evidence = IssueActivityEvidence.model_validate(
-                evidence_payload
-            )
+            evidence = IssueActivityEvidence.model_validate(evidence_payload)
 
         except Exception as exc:
             raise _ProbeFailure(
@@ -298,22 +287,14 @@ class ReconciliationEngine:
         """Extract a valid issue number from persisted transaction args."""
 
         if not isinstance(args, Mapping):
-            raise ReconciliationError(
-                "Persisted transaction arguments must be an object"
-            )
+            raise ReconciliationError("Persisted transaction arguments must be an object")
 
         value = args.get("issue_number")
 
         # bool is a subclass of int in Python.
         # Explicitly reject True and False.
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, int)
-            or value <= 0
-        ):
-            raise ReconciliationError(
-                "Persisted transaction has an invalid issue_number"
-            )
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ReconciliationError("Persisted transaction has an invalid issue_number")
 
         return value
 
@@ -347,9 +328,7 @@ class ReconciliationEngine:
 
         if structured_content is not None:
             if not isinstance(structured_content, dict):
-                raise ValueError(
-                    "MCP structuredContent must be a JSON object"
-                )
+                raise ValueError("MCP structuredContent must be a JSON object")
 
             return structured_content
 
@@ -374,9 +353,7 @@ class ReconciliationEngine:
             if isinstance(parsed, dict):
                 return parsed
 
-        raise ValueError(
-            "MCP response contained no usable structured evidence"
-        )
+        raise ValueError("MCP response contained no usable structured evidence")
 
     @staticmethod
     def _build_reason(
@@ -392,9 +369,7 @@ class ReconciliationEngine:
             TransactionState.SUCCEEDED: (
                 "Issue is closed and exactly one transaction marker exists."
             ),
-            TransactionState.NOT_EXECUTED: (
-                "Issue is open and no transaction marker exists."
-            ),
+            TransactionState.NOT_EXECUTED: ("Issue is open and no transaction marker exists."),
             TransactionState.UNRESOLVED: (
                 "Issue state and transaction marker evidence are inconsistent."
             ),

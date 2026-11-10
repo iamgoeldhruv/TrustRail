@@ -96,6 +96,7 @@ async def issues_command(
                 server_revision=discovery.server_revision,
                 client_execution_id=uuid4(),
             )
+            
 
             if result.isError:
                 print("Error: Otari reported an MCP tool execution failure.")
