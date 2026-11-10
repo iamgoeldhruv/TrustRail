@@ -459,7 +459,7 @@ async def update_fault_mode(request: Request) -> JSONResponse:
 
 
 def create_mcp_app():
-    railway_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN")
+    railway_domain = "https://trustrail-djkv.onrender.com"
 
     if railway_domain:
         security_settings = TransportSecuritySettings(
