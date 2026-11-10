@@ -52,6 +52,7 @@ def _row_to_transaction(row: sqlite3.Row) -> Transaction:
                 else None
             ),
             approval_id=row["approval_id"],
+            approval_invalidation_reason=row["approval_invalidation_reason"],
             otari_request_ids=(
                 json.loads(row["otari_request_ids_json"])
                 if row["otari_request_ids_json"] is not None
@@ -114,8 +115,8 @@ class TransactionStore:
                         args_hash, status, server_revision, facts_json,
                         authorization_decision, authorization_reasons_json,
                         evaluated_at, approval_id, otari_request_ids_json,
-                        attempt, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        approval_invalidation_reason, attempt, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         str(transaction.id),
@@ -140,6 +141,7 @@ class TransactionStore:
                             else None
                         ),
                         transaction.approval_id,
+                        transaction.approval_invalidation_reason,
                         (
                             _json_dumps(transaction.otari_request_ids)
                             if transaction.otari_request_ids is not None
@@ -562,6 +564,65 @@ class TransactionStore:
             except Exception:
                 connection.rollback()
                 raise
+
+    def invalidate_approval(
+        self,
+        transaction_id: UUID | str,
+        reason: str,
+    ) -> Transaction:
+        """Atomically transition PRECHECK to APPROVAL_INVALIDATED and audit it."""
+        from app.txn.invalidation import ApprovalInvalidationReason
+
+        transaction_id = str(transaction_id)
+        invalidation_reason = ApprovalInvalidationReason(reason)
+        with get_connection(self.db_path) as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT status FROM transactions WHERE id = ?",
+                    (transaction_id,),
+                ).fetchone()
+                if row is None:
+                    raise TransactionNotFoundError(transaction_id)
+                current = TransactionState(row["status"])
+                transition(current, TransactionState.APPROVAL_INVALIDATED)
+                cursor = connection.execute(
+                    """
+                    UPDATE transactions
+                    SET status = ?, approval_invalidation_reason = ?, updated_at = ?
+                    WHERE id = ? AND status = ?
+                    """,
+                    (
+                        TransactionState.APPROVAL_INVALIDATED.value,
+                        invalidation_reason.value,
+                        _utc_now().isoformat(),
+                        transaction_id,
+                        TransactionState.PRECHECK.value,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError("Transaction is no longer in PRECHECK")
+                self.ledger_store.append_event_in_transaction(
+                    connection,
+                    LedgerEventCreate(
+                        txn_id=transaction_id,
+                        type="APPROVAL_INVALIDATED",
+                        payload={
+                            "reason": invalidation_reason.value,
+                            "from_status": current.value,
+                            "to_status": TransactionState.APPROVAL_INVALIDATED.value,
+                        },
+                    ),
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+
+        result = self.get_transaction(transaction_id)
+        if result is None:
+            raise TransactionNotFoundError(transaction_id)
+        return result
 
     def recover_on_start(self) -> int:
 

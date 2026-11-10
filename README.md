@@ -101,6 +101,7 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - [x] Integrated migrations into the FastAPI lifespan.
 - [x] Added database migration and persistence tests.
 - [x] Implemented atomic dispatch claiming (`PRECHECK` → `DISPATCHING`) using conditional updates and rows-affected validation.
+- [x] Revalidated approved policy content, facts and MCP revision during PRECHECK, with atomic, ledger-recorded approval invalidation reasons.
 - [x] Added concurrent dispatch-claim tests.
 - [x] Implemented startup recovery (`DISPATCHING` → `INDETERMINATE`).
 - [x] Added recovery tests covering multiple transactions, unchanged states and idempotency.

@@ -1,12 +1,16 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from app.approvals.hashing import approval_binding_hash
+from app.approvals.hashing import approval_binding_hash, policy_content_hash
 from app.approvals.models import Approval, ApprovalCreate, ApprovalDecision
 from app.approvals.store import ApprovalStore
+from app.db.connection import get_connection
+from app.policy.models import Policy
+from app.policy.validator import PolicySemanticError, validate_policy
 
 if TYPE_CHECKING:
     from app.txn.store import TransactionStore
@@ -81,12 +85,31 @@ class ApprovalService:
                 "Persisted transaction facts are incomplete or invalid"
             ) from exc
 
+        with get_connection(self.transaction_store.db_path) as connection:
+            row = connection.execute(
+                "SELECT json FROM policies WHERE id = ? AND version = ?",
+                (transaction.policy_id, transaction.policy_version),
+            ).fetchone()
+        if row is None:
+            raise ValueError("Policy version does not exist")
+        raw_policy = json.loads(row["json"])
+        try:
+            policy = Policy.model_validate(raw_policy)
+            validate_policy(policy)
+            current_policy_hash = policy_content_hash(policy)
+        except (ValueError, PolicySemanticError) as exc:
+            if isinstance(raw_policy, dict):
+                current_policy_hash = None
+            else:
+                raise ValueError("Stored policy is invalid") from exc
+
         binding_hash = approval_binding_hash(
             tool=transaction.tool,
             args=transaction.args,
             policy_version=transaction.policy_version,
             facts_that_matter=facts_that_matter,
             server_revision=transaction.server_revision,
+            policy_hash=current_policy_hash,
         )
 
         approval = ApprovalCreate(
@@ -94,6 +117,7 @@ class ApprovalService:
             approver=approver,
             decision=decision,
             binding_hash=binding_hash,
+            policy_hash=current_policy_hash,
             decided_at=datetime.now(UTC),
         )
 

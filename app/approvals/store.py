@@ -8,9 +8,9 @@ from typing import Any
 from app.approvals.hashing import approval_binding_hash
 from app.approvals.models import Approval, ApprovalCreate, ApprovalDecision
 from app.db.connection import get_connection
-
 from app.ledger.models import LedgerEventCreate
 from app.ledger.store import LedgerStore
+
 
 class ApprovalStore:
     def __init__(self, db_path: str | Path | None = None) -> None:
@@ -23,8 +23,9 @@ class ApprovalStore:
                 connection.execute(
                     """
                     INSERT INTO approvals (
-                        id, txn_id, approver, decision, binding_hash, decided_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        id, txn_id, approver, decision, binding_hash, policy_hash,
+                        decided_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         approval.id,
@@ -32,6 +33,7 @@ class ApprovalStore:
                         approval.approver,
                         approval.decision.value,
                         approval.binding_hash,
+                        approval.policy_hash,
                         approval.decided_at.astimezone(UTC).isoformat(),
                     ),
                 )
@@ -99,9 +101,10 @@ class ApprovalStore:
                 connection.execute(
                     """
                     INSERT INTO approvals (
-                        id, txn_id, approver, decision, binding_hash, decided_at
+                        id, txn_id, approver, decision, binding_hash, policy_hash,
+                        decided_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         approval.id,
@@ -109,6 +112,7 @@ class ApprovalStore:
                         approval.approver,
                         approval.decision.value,
                         approval.binding_hash,
+                        approval.policy_hash,
                         approval.decided_at.astimezone(UTC).isoformat(),
                     ),
                 )
@@ -147,6 +151,7 @@ class ApprovalStore:
                             "decision": approval.decision.value,
                             "approver": approval.approver,
                             "binding_hash": approval.binding_hash,
+                            "policy_hash": approval.policy_hash,
                             "from_status": current_state.value,
                             "to_status": next_state.value,
                         },
@@ -175,6 +180,7 @@ class ApprovalStore:
             approver=row["approver"],
             decision=ApprovalDecision(row["decision"]),
             binding_hash=row["binding_hash"],
+            policy_hash=row["policy_hash"],
             decided_at=datetime.fromisoformat(row["decided_at"]),
         )
 
@@ -188,6 +194,7 @@ class ApprovalStore:
         policy_version: int,
         facts_that_matter: dict[str, Any],
         server_revision: str,
+        policy_hash: str | None = None,
     ) -> Approval:
         approval = self.get(approval_id)
         if approval is None:
@@ -196,6 +203,8 @@ class ApprovalStore:
             raise ValueError("Approval is bound to a different transaction")
         if approval.decision is not ApprovalDecision.APPROVE:
             raise ValueError("Approval decision is not APPROVE")
+        if policy_hash is not None and approval.policy_hash is None:
+            raise ValueError("Approval has no policy hash")
 
         expected_hash = approval_binding_hash(
             tool=tool,
@@ -203,6 +212,7 @@ class ApprovalStore:
             policy_version=policy_version,
             facts_that_matter=facts_that_matter,
             server_revision=server_revision,
+            policy_hash=policy_hash if policy_hash is not None else approval.policy_hash,
         )
         if approval.binding_hash != expected_hash:
             raise ValueError("Approval binding does not match the current action")

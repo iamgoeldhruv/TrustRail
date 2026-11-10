@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
+from pydantic import ValidationError
+
+from app.approvals.hashing import policy_content_hash
 from app.approvals.store import ApprovalStore
 from app.authz.engine import evaluate
 from app.authz.models import Action, Fact, RunState
@@ -13,6 +17,8 @@ from app.facts.github import extract_structured_result, parse_issue_facts
 from app.otari.exceptions import OtariMCPError
 from app.otari.mcp import OtariMCPClient
 from app.policy.models import Policy
+from app.policy.validator import PolicySemanticError, validate_policy
+from app.txn.invalidation import ApprovalInvalidationReason
 from app.txn.models import Transaction
 from app.txn.outcome_classifier import classify_execution_outcome
 from app.txn.states import TransactionState
@@ -54,54 +60,79 @@ class TransactionExecutor:
         approval_id: str | None = None,
     ) -> Transaction:
         transaction = self._require_transaction(transaction_id)
-        policy = self._load_policy(transaction)
         action = self._action(transaction)
 
         if transaction.status is TransactionState.PROPOSED:
+            policy = self._load_policy(transaction)
             transaction = self.store.update_transaction_status(
                 transaction.id,
                 TransactionState.VALIDATING,
             )
-
-        discovery, facts = await self._resolve_facts(action.issue_number)
-        decision = evaluate(
-            policy,
-            action,
-            facts,
-            RunState(budget_consumed_actions=self._budget_consumed_actions(transaction.run_id)),
-        )
-        if decision.decision.value in {"DENY", "POLICY_INVALID"}:
-            return self.store.update_transaction_status(
-                transaction.id,
-                TransactionState.DENIED,
+            discovery, facts = await self._resolve_facts(action.issue_number)
+            decision = evaluate(
+                policy,
+                action,
+                facts,
+                RunState(
+                    budget_consumed_actions=self._budget_consumed_actions(
+                        transaction.run_id
+                    )
+                ),
             )
-
-        if decision.decision.value == "REQUIRES_APPROVAL":
-            if not approval_id and not transaction.approval_id:
-                self.store.update_transaction_status(
+            if decision.decision.value in {"DENY", "POLICY_INVALID"}:
+                return self.store.update_transaction_status(
                     transaction.id,
-                    TransactionState.PENDING_APPROVAL,
+                    TransactionState.DENIED,
                 )
-                raise ApprovalRequiredError(f"Transaction {transaction.id} requires approval")
-            approval_id = approval_id or transaction.approval_id
-        elif decision.decision.value == "ALLOW":
-            if transaction.status is TransactionState.VALIDATING:
+            if decision.decision.value == "REQUIRES_APPROVAL":
+                transaction = self.store.persist_authorization_decision(
+                    transaction.id,
+                    decision=decision.decision.value,
+                    reasons=decision.reasons,
+                    facts={"repository": self.expected_repository, **facts.model_dump()},
+                    server_revision=discovery.server_revision,
+                    evaluated_at=datetime.now(UTC),
+                    target_state=TransactionState.PENDING_APPROVAL,
+                )
+                if not approval_id:
+                    raise ApprovalRequiredError(
+                        f"Transaction {transaction.id} requires approval"
+                    )
+            elif decision.decision.value == "ALLOW":
                 transaction = self.store.update_transaction_status(
                     transaction.id,
                     TransactionState.APPROVED,
                 )
 
-        if approval_id is not None:
+        requires_approval = transaction.authorization_decision == "REQUIRES_APPROVAL"
+        approval_policy_hash: str | None = None
+        approval_record_id: str | None = None
+        if requires_approval:
+            approval_id = approval_id or transaction.approval_id
+            if not approval_id:
+                raise ApprovalRequiredError(f"Transaction {transaction.id} requires approval")
+            original_facts = self._original_facts(transaction)
+            if not transaction.server_revision:
+                raise TransactionExecutionError("Original server revision is missing")
+            approval_record = self.approval_store.get(approval_id)
+            if approval_record is None:
+                raise TransactionExecutionError("Approval cannot be verified")
+            if approval_record.policy_hash is None:
+                raise TransactionExecutionError("Approval cannot be verified")
+            approval_policy_hash = approval_record.policy_hash
+            approval_record_id = approval_record.id
             self.approval_store.verify(
                 approval_id=approval_id,
                 txn_id=transaction.id,
                 tool=transaction.tool,
                 args=transaction.args,
                 policy_version=transaction.policy_version,
-                facts_that_matter=facts.model_dump(),
-                server_revision=discovery.server_revision,
+                facts_that_matter=original_facts.model_dump(),
+                server_revision=transaction.server_revision,
+                policy_hash=approval_policy_hash,
             )
-            self.store.attach_approval(transaction.id, approval_id)
+            if transaction.approval_id is None:
+                self.store.attach_approval(transaction.id, approval_id)
 
         if transaction.status is TransactionState.PENDING_APPROVAL:
             transaction = self.store.update_transaction_status(
@@ -114,11 +145,63 @@ class TransactionExecutor:
                 TransactionState.PRECHECK,
             )
 
-        latest_discovery, latest_facts = await self._resolve_facts(action.issue_number)
-        if latest_discovery.server_revision != discovery.server_revision or latest_facts != facts:
-            raise TransactionExecutionError(
-                "Approval invalidated because facts or server revision changed"
+        dispatch_revision: str
+        if requires_approval:
+            try:
+                current_policy = self._load_policy(transaction)
+            except TransactionExecutionError:
+                return self.store.invalidate_approval(
+                    transaction.id,
+                    ApprovalInvalidationReason.NOW_DENIED.value,
+                )
+            latest_discovery, latest_facts = await self._resolve_facts(
+                action.issue_number
             )
+            current_decision = evaluate(
+                current_policy,
+                action,
+                latest_facts,
+                RunState(
+                    budget_consumed_actions=self._budget_consumed_actions(
+                        transaction.run_id
+                    )
+                ),
+            )
+
+            if current_decision.decision.value in {"DENY", "POLICY_INVALID"}:
+                return self.store.invalidate_approval(
+                    transaction.id,
+                    ApprovalInvalidationReason.NOW_DENIED.value,
+                )
+
+            original_facts = self._original_facts(transaction)
+            current_policy_hash = policy_content_hash(current_policy)
+            reason = None
+            if latest_discovery.server_revision != transaction.server_revision:
+                reason = ApprovalInvalidationReason.REVISION_CHANGED
+            elif latest_facts != original_facts:
+                reason = ApprovalInvalidationReason.FACTS_CHANGED
+            elif current_policy_hash != approval_policy_hash:
+                reason = ApprovalInvalidationReason.POLICY_CHANGED
+            if reason is not None:
+                return self.store.invalidate_approval(transaction.id, reason.value)
+
+            assert approval_record_id is not None
+            assert approval_policy_hash is not None
+            self.approval_store.verify(
+                approval_id=approval_record_id,
+                txn_id=transaction.id,
+                tool=transaction.tool,
+                args=transaction.args,
+                policy_version=transaction.policy_version,
+                facts_that_matter=latest_facts.model_dump(),
+                server_revision=latest_discovery.server_revision,
+                policy_hash=current_policy_hash,
+            )
+            dispatch_revision = latest_discovery.server_revision
+        else:
+            latest_discovery, _ = await self._resolve_facts(action.issue_number)
+            dispatch_revision = latest_discovery.server_revision
 
         if not self.store.claim_for_dispatch(transaction.id):
             raise TransactionExecutionError("Transaction dispatch claim failed")
@@ -128,7 +211,7 @@ class TransactionExecutor:
                 server_id=self.server_id,
                 tool_name=transaction.tool,
                 arguments=transaction.args,
-                server_revision=latest_discovery.server_revision,
+                server_revision=dispatch_revision,
                 client_execution_id=uuid4(),
             )
             self.store.record_otari_request_id(
@@ -224,7 +307,32 @@ class TransactionExecutor:
             ).fetchone()
         if row is None:
             raise TransactionExecutionError("Policy version does not exist")
-        return Policy.model_validate(json.loads(row["json"]))
+        try:
+            policy = Policy.model_validate(json.loads(row["json"]))
+            validate_policy(policy)
+            return policy
+        except (json.JSONDecodeError, ValidationError, PolicySemanticError) as exc:
+            raise TransactionExecutionError("Policy is invalid") from exc
+
+    @staticmethod
+    def _original_facts(transaction: Transaction) -> Fact:
+        if not isinstance(transaction.facts, dict):
+            raise TransactionExecutionError("Original facts are missing")
+        try:
+            return Fact.model_validate(
+                {
+                    key: transaction.facts[key]
+                    for key in (
+                        "issue_number",
+                        "state",
+                        "labels",
+                        "priority",
+                        "inactive_days",
+                    )
+                }
+            )
+        except (KeyError, ValidationError, ValueError) as exc:
+            raise TransactionExecutionError("Original facts are invalid") from exc
 
     @staticmethod
     def _action(transaction: Transaction) -> Action:

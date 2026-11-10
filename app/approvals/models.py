@@ -16,6 +16,7 @@ class ApprovalCreate(BaseModel):
     approver: str = Field(min_length=1)
     decision: ApprovalDecision
     binding_hash: str = Field(min_length=64, max_length=64)
+    policy_hash: str | None = Field(default=None, min_length=64, max_length=64)
     decided_at: datetime
 
 
