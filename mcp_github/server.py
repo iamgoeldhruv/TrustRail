@@ -458,19 +458,16 @@ async def update_fault_mode(request: Request) -> JSONResponse:
     )
 
 
-def create_mcp_app():
-    railway_domain = "https://trustrail-djkv.onrender.com"
 
-    if railway_domain:
-        security_settings = TransportSecuritySettings(
-            enable_dns_rebinding_protection=True,
-            allowed_hosts=[
-                railway_domain,
-                f"{railway_domain}:*",
-            ],
-        )
-    else:
-        security_settings = None
+def create_mcp_app():
+    railway_hostname = "trustrail-djkv.onrender.com"
+
+    security_settings = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[
+            railway_hostname,
+        ],
+    )
 
     mcp_app = mcp.streamable_http_app(
         json_response=True,
@@ -487,8 +484,8 @@ def create_mcp_app():
         ),
     )
 
-    # Keep MCP as the root application so its lifespan runs.
     return DropResponseMiddleware(mcp_app)
+
 
 
 def main() -> None:
