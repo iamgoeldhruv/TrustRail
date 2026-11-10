@@ -5,6 +5,9 @@ The frontend exposes two control-plane screens:
 - **Run** starts a backend-owned agent run, polls its read-only status, displays
   persisted ledger activity and proposals, and sends approval/rejection decisions
   through the transaction API.
+- **Ledger** lists persisted transactions, exposes run and transaction event
+  timelines, stored Otari request IDs, reconciliation evidence, and a
+  backend-authoritative hash-chain verification action.
 - **Policies** compiles, dry-runs, and explicitly activates policies.
 
 The Run screen uses these backend endpoints:
@@ -14,6 +17,9 @@ The Run screen uses these backend endpoints:
 - `POST /api/v1/transactions/{transaction_id}/approve`
 - `POST /api/v1/transactions/{transaction_id}/reject`
 - `POST /api/v1/transactions/{transaction_id}/retry`
+- `GET /api/v1/ledger/transactions`
+- `GET /api/v1/ledger/transactions/{transaction_id}`
+- `POST /api/v1/ledger/transactions/{transaction_id}/verify`
 
 The deployment uses fixed Otari routing policies for now: `trustrail-compiler`
 for policy compilation and `trustrail-planner` for agent runs. They are shown
