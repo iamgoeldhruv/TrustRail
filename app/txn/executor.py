@@ -120,7 +120,7 @@ class TransactionExecutor:
                 raise TransactionExecutionError("Approval cannot be verified")
             approval_policy_hash = approval_record.policy_hash
             approval_record_id = approval_record.id
-            self.approval_store.verify(
+            _=self.approval_store.verify(
                 approval_id=approval_id,
                 txn_id=transaction.id,
                 tool=transaction.tool,
