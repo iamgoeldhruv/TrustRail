@@ -141,12 +141,12 @@ class TransactionStore:
                             else None
                         ),
                         transaction.approval_id,
-                        transaction.approval_invalidation_reason,
                         (
                             _json_dumps(transaction.otari_request_ids)
                             if transaction.otari_request_ids is not None
                             else None
                         ),
+                        transaction.approval_invalidation_reason,
                         transaction.attempt,
                         created_at.isoformat(),
                         updated_at.isoformat(),

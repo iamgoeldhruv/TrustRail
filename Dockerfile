@@ -14,5 +14,5 @@ RUN python -m pip install --no-cache-dir -r requirements.txt
 # Copy application source code
 COPY . .
 
-# Start the MCP server
-CMD ["python", "-m", "mcp_spike.server"]
+# Start the GitHub MCP server
+CMD ["python", "-m", "mcp_github.server"]

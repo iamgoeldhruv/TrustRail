@@ -436,6 +436,9 @@ Prerequisites:
   `OTARI_MCP_SERVER_ID`.
 - `MCP_GITHUB_SERVER_URL` points to the GitHub MCP server that exposes
   `/admin/fault`; the server must accept the configured admin token.
+- The deployed container must start `mcp_github.server` (the repository
+  Dockerfile is configured accordingly); deploying `mcp_spike.server` does not
+  provide the GitHub write tools or `/admin/fault`.
 - The database contains the active `demo-close-issue-policy` v1. The script
   calls the existing sandbox seeding helper and safely resets the selected
   seeded issue before verification.
@@ -447,13 +450,16 @@ python -m scripts.e2e_lost_response_recovery
 ```
 
 The script resets the MCP fault mode to `none` in a `finally` block. It does
-not retry the uncertain write or delete the resulting evidence after the
-verification. **Verification status:** the script was attempted on 2026-11-10. Sandbox
-seeding and reset, transaction creation, policy evaluation, and approval
-completed, but execution stopped before enabling fault injection because
-`MCP_GITHUB_SERVER_URL` was not configured. No GitHub write or successful
-lost-response recovery was claimed. A successful run prints the transaction
-ID, marker, each verification step, and a final success summary. Any failed
+not retry the uncertain write or delete the resulting evidence after
+the verification. **Verification status:** an execution was attempted on
+2026-11-10. Sandbox seeding and reset, transaction creation, policy
+evaluation, approval, and the GitHub write completed, but the transaction
+returned `SUCCEEDED` instead of `INDETERMINATE` because the deployed container
+was running `mcp_spike.server`, not `mcp_github.server`. The Dockerfile has been
+corrected; the external MCP deployment must be rebuilt and redeployed before a
+successful lost-response recovery can be claimed. A successful run prints the
+transaction ID, marker, each verification step, and a final success summary.
+Any failed
 assertion exits non-zero.
 ### Run-Scoped Read-Tool Audit Events
 

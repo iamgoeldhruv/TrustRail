@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import os
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -81,11 +80,10 @@ def _require(condition: bool, message: str) -> None:
 
 
 def _github_settings() -> GitHubSettings:
-    admin_token = os.getenv("TRUSTRAIL_ADMIN_TOKEN") or settings.mcp_admin_token
     return GitHubSettings(
         mcp_github_pat=SecretStr(settings.mcp_github_pat),
         mcp_github_repo=settings.mcp_github_repo,
-        trustrail_admin_token=SecretStr(admin_token),
+        trustrail_admin_token=SecretStr(settings.mcp_admin_token),
     )
 
 
@@ -95,19 +93,19 @@ async def _set_fault_mode(mode: FaultMode) -> None:
 
     github_settings = _github_settings()
     endpoint = f"{server_url.rstrip('/')}/admin/fault"
-    print(settings.mcp_admin_token)
     async with httpx.AsyncClient(timeout=20.0) as client:
         response = await client.post(
             endpoint,
             headers={
                 "Authorization": (
                     "Bearer "
-                    f"{settings.mcp_admin_token}"
+                    f"{github_settings.trustrail_admin_token.get_secret_value()}"
                 )
             },
             json={"mode": mode.value},
         )
         response.raise_for_status()
+
         payload = response.json()
 
     _require(
