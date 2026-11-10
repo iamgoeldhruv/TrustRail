@@ -14,5 +14,8 @@ RUN python -m pip install --no-cache-dir -r requirements.txt
 # Copy application source code
 COPY . .
 
-# Start the GitHub MCP server
-CMD ["python", "-m", "mcp_github.server"]
+COPY start.sh /app/start.sh
+
+RUN chmod +x /app/start.sh
+
+CMD ["/app/start.sh"]
