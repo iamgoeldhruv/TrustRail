@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ApiError } from './lib/api/client'
 import { policyApi } from './lib/api/policies'
 import RunScreen from './RunScreen'
+import LedgerScreen from './LedgerScreen'
 import './App.css'
 
 const EXAMPLE = 'Allow the agent to close stale P2 and P3 issues in the configured repository when they have been inactive for at least 30 days. Require human approval before closing P1 issues. Never close issues with the security label.'
@@ -92,12 +93,13 @@ function App() {
         <div className="brand"><span className="brand-mark">TR</span><span>TrustRail</span></div>
         <nav className="screen-nav" aria-label="Primary">
           <button className={screen === 'run' ? 'nav-active' : ''} onClick={() => setScreen('run')}>Run</button>
+          <button className={screen === 'ledger' ? 'nav-active' : ''} onClick={() => setScreen('ledger')}>Ledger</button>
           <button className={screen === 'policy' ? 'nav-active' : ''} onClick={() => setScreen('policy')}>Policies</button>
         </nav>
         <div className="status-pill"><span className="status-dot" /> Authorization console</div>
       </header>
 
-      {screen === 'run' ? <RunScreen /> : <>
+      {screen === 'run' ? <RunScreen /> : screen === 'ledger' ? <LedgerScreen /> : <>
       <section className="hero-copy">
         <p className="eyebrow">POLICY MANAGEMENT / CONTROL PLANE</p>
         <h1>Authorise with intention.</h1>

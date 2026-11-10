@@ -72,9 +72,7 @@ def _run_row(run_id: str, request: Request) -> dict[str, Any]:
         "tool_calls": row["tool_calls"],
         "model_iterations": row["model_iterations"],
         "provider_usage": (
-            json.loads(row["provider_usage_json"])
-            if row["provider_usage_json"]
-            else {}
+            json.loads(row["provider_usage_json"]) if row["provider_usage_json"] else {}
         ),
         "error": row["error"],
         "proposals": [_transaction_payload(item) for item in transactions],
@@ -155,9 +153,7 @@ async def _execute_run(
                 payload={
                     "termination_reason": result.termination_reason,
                     "tool_calls": result.tool_calls,
-                    "proposals": len(
-                        app.state.transaction_store.list_transactions(run_id=run_id)
-                    ),
+                    "proposals": len(app.state.transaction_store.list_transactions(run_id=run_id)),
                 },
             )
         )

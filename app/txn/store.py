@@ -383,7 +383,15 @@ class TransactionStore:
         *,
         status: TransactionState | None = None,
         run_id: str | None = None,
+        search: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[Transaction]:
+        if limit is not None and (limit < 1 or limit > 200):
+            raise ValueError("limit must be between 1 and 200")
+        if offset < 0:
+            raise ValueError("offset must not be negative")
+
         clauses: list[str] = []
         parameters: list[str] = []
 
@@ -394,6 +402,12 @@ class TransactionStore:
         if run_id is not None:
             clauses.append("run_id = ?")
             parameters.append(run_id)
+        if search:
+            pattern = f"%{search.strip()}%"
+            clauses.append(
+                "(id LIKE ? OR run_id LIKE ? OR tool LIKE ?)"
+            )
+            parameters.extend([pattern, pattern, pattern])
 
         query = "SELECT * FROM transactions"
 
@@ -401,6 +415,9 @@ class TransactionStore:
             query += " WHERE " + " AND ".join(clauses)
 
         query += " ORDER BY created_at, id"
+        if limit is not None:
+            query += " LIMIT ? OFFSET ?"
+            parameters.extend([str(limit), str(offset)])
 
         with get_connection(self.db_path) as connection:
             rows = connection.execute(query, parameters).fetchall()
