@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.agent.proposal_service import ProposalService
 from app.db.connection import get_connection
 from app.txn.executor import ApprovalRequiredError, TransactionExecutionError
+from app.otari.exceptions import OtariMCPError, OtariMCPNotStartedError
 from app.txn.states import TransactionState
 from mcp_github.client import GitHubClient
 from mcp_github.config import GitHubSettings
@@ -197,6 +198,20 @@ async def run_chaos_demo(body: ChaosRunRequest, request: Request) -> dict[str, A
         transaction = await executor.execute(proposal.id, executor=body.executor)
     except ApprovalRequiredError:
         transaction = app.state.transaction_store.get_transaction(proposal.id)
+    except OtariMCPNotStartedError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Otari MCP discovery could not start. "
+                "The Otari discovery limit or capacity may be exhausted; "
+                "try again after the limit resets."
+            ),
+        ) from exc
+    except OtariMCPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Otari MCP discovery failed before execution started.",
+        ) from exc
     except (TransactionExecutionError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {
