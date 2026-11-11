@@ -99,6 +99,41 @@ class OtariClient:
 
         return data
 
+    async def get_json(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """GET a JSON resource from the configured Otari v1 API."""
+        base = self.base_url.rstrip("/")
+        if not base.endswith("/v1"):
+            base = f"{base}/v1"
+        url = f"{base}/{path.lstrip('/')}"
+
+        try:
+            response = await self.http_client.get(url, params=params)
+            if response.status_code == 401:
+                raise OtariAuthenticationError("Otari rejected the API key.")
+            response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise OtariTimeoutError("Request to Otari timed out.") from exc
+        except httpx.ConnectError as exc:
+            raise OtariConnectionError("Could not connect to Otari.") from exc
+        except httpx.HTTPStatusError as exc:
+            raise OtariAPIError(
+                message=f"Otari returned HTTP {exc.response.status_code}",
+                status_code=exc.response.status_code,
+            ) from exc
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise OtariResponseError("Otari returned invalid JSON.") from exc
+        if not isinstance(data, dict):
+            raise OtariResponseError("Otari returned an unexpected JSON response.")
+        return data
+
     async def aclose(self) -> None:
         await self.http_client.aclose()
 
