@@ -58,7 +58,13 @@ def parse_otari_tool_calls(response: dict[str, Any]) -> list[OtariToolCall]:
         url = _text(raw.get("url"))
         status = _text(raw.get("status"))
         error_value = raw.get("error")
-        error = _text(error_value) if isinstance(error_value, str) else None
+        if isinstance(error_value, str):
+            error = _text(error_value)
+        elif isinstance(error_value, dict):
+            tag = _text(error_value.get("tag"))
+            error = tag or "tool_failed"
+        else:
+            error = None
         sources = raw.get("sources")
         safe_sources = (
             [item for item in sources if isinstance(item, dict)]
@@ -90,5 +96,5 @@ def parse_otari_tool_calls(response: dict[str, Any]) -> list[OtariToolCall]:
 def research_tools(*, search_max_uses: int, fetch_max_uses: int) -> list[dict[str, Any]]:
     return [
         {"type": "otari_web_search", "max_uses": search_max_uses},
-        {"type": "otari_web_fetch", "max_uses": fetch_max_uses},
+        {"type": "otari_web_fetch"},
     ]
