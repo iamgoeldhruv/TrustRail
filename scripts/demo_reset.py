@@ -160,7 +160,7 @@ async def reset_fault_mode(
     Configure MCP_GITHUB_SERVER_URL with the public server base URL.
     """
 
-    server_url = "https://trustrail-production-8639.up.railway.app" 
+    server_url = "https://trustrail-djkv.onrender.com" 
 
     if not server_url:
         raise RuntimeError(
