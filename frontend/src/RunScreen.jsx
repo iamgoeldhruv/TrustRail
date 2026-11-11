@@ -42,6 +42,13 @@ function ProposalCard({ proposal, onDecision, busy }) {
 
 function StageDetails({ stage }) {
   const details = stage.details || {}
+  if (stage.id === 'research') {
+    const events = details.events || []
+    return <div className="detail-grid">
+      <div><span>Activity</span><strong>{events.length} event(s)</strong></div>
+      <div className="detail-wide"><span>Research activity</span>{events.length ? <ol className="activity-feed">{events.map((event) => <li key={event.id}><span className="activity-dot" /><div><b>{event.payload?.tool_name || event.type.replaceAll('_', ' ')}</b><p>{event.payload?.query || event.payload?.url || event.payload?.status || event.payload?.error || 'Research event recorded.'}</p>{event.payload?.url && <a href={event.payload.url} target="_blank" rel="noreferrer">{event.payload.url}</a>}{event.payload?.sources?.map((source) => source.url && <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.title || source.url}</a>)}<small>{new Date(event.ts).toLocaleString()}</small></div></li>)}</ol> : <p className="muted">External research was not required for this request.</p>}</div>
+    </div>
+  }
   if (stage.id === 'planning') return <TechnicalActivity events={details.events} />
   if (stage.id === 'guardrail') {
     const result = details.latest

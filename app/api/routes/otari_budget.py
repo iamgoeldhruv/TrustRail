@@ -19,6 +19,30 @@ from app.otari.exceptions import (
 router = APIRouter(prefix="/api/v1/integrations/otari", tags=["Otari"])
 
 
+@router.get("/tools")
+async def get_tools(request: Request) -> dict:
+    client = getattr(request.app.state, "planner_client", None)
+    if client is None:
+        raise HTTPException(status_code=503, detail="Otari planner is not configured")
+    try:
+        data = await client.tools()
+    except Exception as exc:
+        raise _upstream_error(exc) from exc
+    raw_tools = data.get("tools", [])
+    tools = []
+    for item in raw_tools if isinstance(raw_tools, list) else []:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name") or item.get("type")
+        if name in {"otari_web_search", "otari_web_fetch"}:
+            tools.append({
+                "name": name,
+                "available": item.get("available"),
+                "unavailable_reason": item.get("unavailable_reason") or item.get("reason"),
+            })
+    return {"tools": tools, "planner_model": request.app.state.settings.tr_planner_model}
+
+
 def _service(request: Request) -> OtariBudgetService:
     service = getattr(request.app.state, "otari_budget_service", None)
     if service is None:

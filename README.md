@@ -58,6 +58,35 @@ in the ledger. A genuine detection can be verified only when Otari returns the
 documented `guardrail_violation` response; a generic upstream error is shown
 as unavailable/failed rather than as a detection.
 
+### Otari web research
+
+Security-advisory, vulnerability, release-note, and official-documentation
+requests run a bounded research preflight before the normal planner. TrustRail
+declares Otari's native tools in the existing Chat Completions request:
+
+```json
+"tools": [
+  {"type": "otari_web_search", "max_uses": 3},
+  {"type": "otari_web_fetch", "max_uses": 3}
+]
+```
+
+Otari executes these tools in its gateway and returns activity in the
+top-level `otari_tool_calls` field. TrustRail preserves only bounded query,
+URL, source, status, error, and request-ID metadata. The authenticated
+workspace can be inspected through the backend-only
+`GET /api/v1/integrations/otari/tools` route; credentials are never sent to
+the browser. Search and fetch activity is recorded as `WEB_*` run-ledger
+events and displayed in the Run screen's External Evidence stage.
+
+Research is evidence, not authorization. The research request has no GitHub
+tools, fetched content is marked untrusted before it reaches the action
+planner, and all proposals still pass the existing deterministic policy,
+approval, and controlled-execution workflow. Workspace domain restrictions,
+provider selection, budgets, and unavailable-tool reasons remain controlled by
+Otari. Live verification requires configured Otari credentials and an
+available workspace.
+
 ### Project Setup & Scaffolding
 
 - [x] Initialized Python virtual environment and installed dependencies.
