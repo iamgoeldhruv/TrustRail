@@ -62,7 +62,11 @@ async def _set_remote_fault(mode: FaultMode, request: Request) -> dict[str, Any]
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.post(
                 f"{_mcp_url()}/admin/fault",
-                headers={"Authorization": f"Bearer our-long-random-secret-token "},
+                headers={
+                    "Authorization": (
+                        f"Bearer {settings.mcp_admin_token}"
+                    )
+                },
                 json={"mode": mode.value},
             )
             response.raise_for_status()
@@ -76,6 +80,7 @@ async def _set_remote_fault(mode: FaultMode, request: Request) -> dict[str, Any]
     except httpx.HTTPStatusError as exc:
         raise HTTPException(status_code=502, detail="MCP fault configuration was rejected") from exc
     except httpx.RequestError as exc:
+        print(exc)
         raise HTTPException(status_code=502, detail="MCP fault server is unavailable") from exc
     except ValueError as exc:
         raise HTTPException(

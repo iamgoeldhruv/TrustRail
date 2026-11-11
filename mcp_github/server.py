@@ -8,6 +8,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+
 import uvicorn
 
 from mcp.server import MCPServer
@@ -18,6 +19,7 @@ from pydantic import BaseModel, Field, ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+from starlette.middleware.cors import CORSMiddleware
 
 from mcp_github.admin_models import (
     FaultUpdateRequest,
@@ -474,7 +476,7 @@ def create_mcp_app():
         transport_security=security_settings,
     )
 
-    # Register admin endpoint on the MCP application's router.
+    # Register admin endpoint.
     mcp_app.router.routes.insert(
         0,
         Route(
@@ -484,8 +486,28 @@ def create_mcp_app():
         ),
     )
 
-    return DropResponseMiddleware(mcp_app)
+    # Allow requests from TrustRail frontend and local development.
+    cors_app = CORSMiddleware(
+        app=mcp_app,
+        allow_origins=[
+            "https://trustrail-production-8639.up.railway.app",
+            "http://localhost:5173",
+        ],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "MCP-Protocol-Version",
+            "Mcp-Session-Id",
+            "Last-Event-ID",
+        ],
+        expose_headers=[
+            "Mcp-Session-Id",
+            "MCP-Protocol-Version",
+        ],
+    )
 
+    return DropResponseMiddleware(cors_app)
 
 
 def main() -> None:
