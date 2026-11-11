@@ -158,12 +158,8 @@ app = FastAPI(
 )
 
 cors_origins = [
-    origin.strip().rstrip("/")
-    for origin in os.getenv(
-        "TRUSTRAIL_FRONTEND_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173",
-    ).split(",")
-    if origin.strip()
+    "https://trustrail-production-829b805b.up.railway.app"
+    
 ]
 
 app.add_middleware(
