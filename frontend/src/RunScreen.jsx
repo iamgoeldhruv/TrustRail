@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ApiError } from './lib/api/client'
 import { runApi } from './lib/api/runs'
 import { usePolling } from './hooks/usePolling'
+import { PlannerBudgetIndicator } from './UsageScreen'
 
 const EXAMPLE = 'Find open issues in the configured repository that have been inactive for more than 30 days and propose closing eligible issues with a note.'
 const TERMINAL_RUN_STATES = new Set(['COMPLETED', 'FAILED'])
@@ -65,7 +66,7 @@ function Workflow({ stages, proposals, onDecision, busy }) {
   </section>
 }
 
-export default function RunScreen() {
+export default function RunScreen({ onViewUsage }) {
   const [requestText, setRequestText] = useState('')
   const [run, setRun] = useState(null)
   const [startError, setStartError] = useState(null)
@@ -96,7 +97,7 @@ export default function RunScreen() {
 
   return <main className="run-shell">
     <section className="run-hero"><div><p className="eyebrow">AGENT OPERATIONS / AUTHORIZATION WORKFLOW</p><h1>Run with control.</h1><p> The planner proposes. TrustRail validates. Humans approve when required. The controlled executor records the outcome.</p></div><div className="security-note"><span className="status-dot" /> Backend authorization enforced</div></section>
-    <form className="panel run-composer" onSubmit={startRun}><div className="panel-heading"><div><p className="eyebrow">REQUEST COMPOSER</p><h2>What should the agent investigate?</h2><p className="muted">This request becomes the immutable run context. The planner can read and propose; it cannot authorize or execute writes.</p></div><span className="state-badge">READ + PROPOSE</span></div><textarea value={requestText} onChange={(event) => setRequestText(event.target.value)} placeholder={EXAMPLE} maxLength={10000} disabled={starting} /><div className="run-form-footer"><div className="model-visibility"><span>Planner model</span><strong>trustrail-planner</strong><small>Configured routing policy</small></div><button className="primary run-button" disabled={starting || !requestText.trim()}>{starting ? 'Starting run…' : 'Start run →'}</button></div><ErrorMessage error={startError} /></form>
+    <form className="panel run-composer" onSubmit={startRun}><div className="panel-heading"><div><p className="eyebrow">REQUEST COMPOSER</p><h2>What should the agent investigate?</h2><p className="muted">This request becomes the immutable run context. The planner can read and propose; it cannot authorize or execute writes.</p></div><span className="state-badge">READ + PROPOSE</span></div><PlannerBudgetIndicator onViewUsage={onViewUsage} /><textarea value={requestText} onChange={(event) => setRequestText(event.target.value)} placeholder={EXAMPLE} maxLength={10000} disabled={starting} /><div className="run-form-footer"><div className="model-visibility"><span>Planner model</span><strong>trustrail-planner</strong><small>Configured routing policy</small></div><button className="primary run-button" disabled={starting || !requestText.trim()}>{starting ? 'Starting run…' : 'Start run →'}</button></div><ErrorMessage error={startError} /></form>
     {!run && <section className="empty-run panel"><span className="empty-icon">01</span><h2>No active run</h2><p className="muted">Start with a natural-language request to see the complete authorization workflow.</p></section>}
     {run && <><section className="run-summary"><div><p className="eyebrow">RUN {run.run_id}</p><h2>{run.status === 'RUNNING' ? 'Planner is working…' : `Run ${run.status.toLowerCase()}`}</h2><p className="muted">{run.user_request}</p></div><div className="run-stat"><span>MODEL</span><b>{run.planner_model}</b></div><div className="run-stat"><span>PROPOSALS</span><b>{run.proposal_count}</b></div><div className="run-stat"><span>PENDING APPROVAL</span><b>{pendingCount}</b></div></section><div className="run-last-updated">{poll.isPolling ? 'Refreshing…' : poll.lastUpdated ? `Last updated ${poll.lastUpdated.toLocaleTimeString()}` : 'Read-only workflow projection'}</div>{decisionError && <ErrorMessage error={decisionError} />}{poll.error && <><ErrorMessage error={poll.error} /><button className="quiet" onClick={poll.refresh}>Retry read-only refresh</button></>}<Workflow stages={run.workflow?.stages || []} proposals={run.proposals} onDecision={decide} busy={busyProposal} /></>}
   </main>

@@ -18,6 +18,22 @@ An authorization and transaction-control layer that lets AI agents act on real s
 - HTTPX (Async GitHub REST API client)
 ## Current Progress
 
+### Otari planner usage and budgets
+
+TrustRail's Usage & Budgets screen reads the planner credential (`OTARI_AGENT_API_KEY`)
+through the backend-only scoped Otari endpoints:
+
+- `GET /api/v1/key/budget`
+- `GET /api/v1/key/usage/summary`
+- `GET /api/v1/key/usage/series`
+
+The browser calls TrustRail's `/api/v1/integrations/otari/*` routes and never
+contacts Otari or receives an API key. Budget limits, reset times, spend,
+requests, tokens, model breakdowns, and series points are rendered from live
+responses; unavailable data is shown as unavailable rather than as zero. The
+configured base URL must match the key's Otari region (US or EU); a regional
+`421` or authentication failure indicates a base URL/key mismatch.
+
 ### Project Setup & Scaffolding
 
 - [x] Initialized Python virtual environment and installed dependencies.

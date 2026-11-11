@@ -10,19 +10,21 @@ from app.agent.orchestrator import AgentOrchestrator
 from app.agent.proposal_service import ProposalService
 from app.agent.tool_handlers import AgentToolHandlers
 from app.api.routes.approvals import router as approvals_router
+from app.api.routes.chaos import router as chaos_router
 from app.api.routes.dry_run import router as dryrun_router
+from app.api.routes.ledger import router as ledger_router
+from app.api.routes.otari_budget import router as otari_budget_router
 from app.api.routes.policy_compilation import router as policy_compilation_router
 from app.api.routes.policy_management import router as policy_management_router
 from app.api.routes.reconciliation import router as reconciliation_router
 from app.api.routes.retry import router as retry_router
 from app.api.routes.runs import router as runs_router
-from app.api.routes.ledger import router as ledger_router
-from app.api.routes.chaos import router as chaos_router
 from app.approvals.service import ApprovalService
 from app.approvals.store import ApprovalStore
 from app.core.config import settings
 from app.db.migrations import run_migrations
 from app.ledger.store import LedgerStore
+from app.otari.budget_service import OtariBudgetService
 from app.otari.client import OtariClient
 from app.otari.mcp import OtariMCPClient
 from app.policy.compiler import PolicyCompiler
@@ -65,6 +67,7 @@ async def lifespan(app: FastAPI):
         OtariClient() as compiler_client,
         OtariClient(api_key=settings.otari_agent_api_key) as planner_client,
     ):
+        app.state.otari_budget_service = OtariBudgetService(planner_client)
         app.state.policy_compiler = PolicyCompiler(
             otari_client=compiler_client,
             model=settings.tr_compiler_model,
@@ -180,6 +183,7 @@ app.include_router(retry_router)
 app.include_router(runs_router)
 app.include_router(ledger_router)
 app.include_router(chaos_router)
+app.include_router(otari_budget_router)
 
 
 @app.get("/health")

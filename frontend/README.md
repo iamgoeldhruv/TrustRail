@@ -9,6 +9,11 @@ The frontend exposes two control-plane screens:
   timelines, stored Otari request IDs, reconciliation evidence, and a
   backend-authoritative hash-chain verification action.
 - **Policies** compiles, dry-runs, and explicitly activates policies.
+- **Usage & Budgets** displays live planner-key budget limits, usage, and spend series from TrustRail's backend.
+
+Usage data is fetched server-side with `OTARI_AGENT_API_KEY`. The browser
+never contacts Otari directly and no Otari credential is exposed in Vite
+environment variables or API responses.
 
 The Run screen uses these backend endpoints:
 
@@ -17,6 +22,9 @@ The Run screen uses these backend endpoints:
 - `POST /api/v1/transactions/{transaction_id}/approve`
 - `POST /api/v1/transactions/{transaction_id}/reject`
 - `POST /api/v1/transactions/{transaction_id}/retry`
+- `GET /api/v1/integrations/otari/budget`
+- `GET /api/v1/integrations/otari/usage`
+- `GET /api/v1/integrations/otari/usage/series`
 - `GET /api/v1/ledger/transactions`
 - `GET /api/v1/ledger/transactions/{transaction_id}`
 - `POST /api/v1/ledger/transactions/{transaction_id}/verify`
