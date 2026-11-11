@@ -46,7 +46,7 @@ def _settings() -> GitHubSettings:
 
 
 def _mcp_url() -> str:
-    value = os.getenv("MCP_GITHUB_SERVER_URL", "").strip()
+    value ="https://trustrail-djkv.onrender.com"
     if not value:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
