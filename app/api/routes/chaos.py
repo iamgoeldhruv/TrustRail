@@ -112,6 +112,34 @@ async def _issue_state(issue_number: int, txn_id: str | None = None) -> dict[str
     }
 
 
+def _observability(transaction: Any, request: Request) -> dict[str, Any]:
+    events = request.app.state.ledger_store.get_events(txn_id=transaction.id)
+    event_payloads = [event.model_dump(mode="json") for event in events]
+    write_attempts = sum(event.type == "WRITE_DISPATCHED" for event in events)
+    read_only_probes = sum(
+        event.type == "RECONCILIATION_STARTED" for event in events
+    )
+    evidence_events = [
+        event.payload
+        for event in events
+        if event.type == "RECONCILIATION_EVIDENCE_RECORDED"
+    ]
+    verification = request.app.state.ledger_store.verify_chain(
+        txn_id=transaction.id
+    )
+    return {
+        "events": event_payloads,
+        "write_attempts": write_attempts,
+        "read_only_probes": read_only_probes,
+        "reconciliation_evidence": evidence_events[-1] if evidence_events else None,
+        "ledger_verification": {
+            "valid": verification.valid,
+            "events_checked": verification.events_checked,
+            "reason": verification.reason,
+        },
+    }
+
+
 @router.get("/status")
 async def chaos_status(request: Request) -> dict[str, Any]:
     settings = _settings()
@@ -220,6 +248,7 @@ async def run_chaos_demo(body: ChaosRunRequest, request: Request) -> dict[str, A
         "run_id": run_id,
         "transaction": transaction.model_dump(mode="json") if transaction else None,
         "issue": await _issue_state(body.issue_number, proposal.id),
+        "observability": _observability(transaction, request) if transaction else None,
     }
 
 
@@ -233,6 +262,7 @@ async def chaos_run(run_id: str, request: Request) -> dict[str, Any]:
         "run_id": run_id,
         "transaction": transaction.model_dump(mode="json"),
         "issue": await _issue_state(transaction.args["issue_number"], transaction.id),
+        "observability": _observability(transaction, request),
     }
 
 

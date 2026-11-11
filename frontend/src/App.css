@@ -291,6 +291,16 @@ button { border: 0; border-radius: 7px; padding: 12px 17px; font-weight: 700; fo
 .invalidation-banner small { color: #c6a968; }
 .proposal-invalidated { border-color: #826532; }
 .warning-alert { color: #f0cf86; background: #3b2b13; border: 1px solid #826532; }
+.chaos-timeline { margin-top: 22px; padding-top: 18px; border-top: 1px solid #1b3045; }
+.chaos-timeline ol { display: grid; gap: 14px; list-style: none; margin: 0; padding: 4px 0 0; }
+.chaos-timeline li { display: flex; gap: 10px; align-items: flex-start; }
+.timeline-dot { width: 8px; height: 8px; flex: 0 0 auto; margin-top: 5px; border-radius: 50%; background: #35c9e8; box-shadow: 0 0 0 4px #35c9e81c; }
+.chaos-timeline li > div { display: grid; gap: 3px; }
+.chaos-timeline strong { color: #dce9f7; font-size: 13px; }
+.chaos-timeline time, .chaos-timeline small { color: #7189a1; font-size: 11px; }
+.recovery-explanation { display: grid; gap: 6px; padding: 14px; margin-top: 18px; color: #b8d9cb; background: #0b211c; border: 1px solid #27644f; border-radius: 7px; font-size: 13px; line-height: 1.45; }
+.recovery-explanation strong { color: #78e5be; }
+.recovery-explanation small { color: #8fb9a9; }
 @keyframes stage-arrival { to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes checkpoint-pulse { 0%, 100% { opacity: .2; transform: scale(1); } 50% { opacity: .7; transform: scale(1.015); } }
 @media (prefers-reduced-motion: reduce) { .workflow-stage, .checkpoint .stage-body::after { animation: none; opacity: 1; transform: none; } }

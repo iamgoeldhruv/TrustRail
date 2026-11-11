@@ -14,7 +14,7 @@ from app.authz.engine import evaluate
 from app.authz.models import Action, Fact, RunState
 from app.db.connection import get_connection
 from app.facts.github import extract_structured_result, parse_issue_facts
-from app.otari.exceptions import OtariMCPError
+from app.otari.exceptions import OtariMCPError, OtariMCPOutcomeUnknownError
 from app.otari.mcp import OtariMCPClient
 from app.policy.models import Policy
 from app.policy.validator import PolicySemanticError, validate_policy
@@ -226,6 +226,16 @@ class TransactionExecutor:
                 dispatch_revision=dispatch_revision,
             )
 
+        self.store.record_event(
+            transaction.id,
+            "WRITE_DISPATCHED",
+            {
+                "attempt": 1,
+                "executor": "secure",
+                "tool": transaction.tool,
+            },
+        )
+
         # Existing secure single-attempt execution.
         try:
             dispatch_arguments = dict(transaction.args)
@@ -247,7 +257,29 @@ class TransactionExecutor:
                 transaction.id,
                 exc.request_id,
             )
+            if isinstance(exc, OtariMCPOutcomeUnknownError):
+                self.store.record_event(
+                    transaction.id,
+                    "EXECUTION_RESPONSE_LOST",
+                    {
+                        "execution_state": exc.execution_state,
+                        "code": exc.code,
+                        "request_id": exc.request_id,
+                    },
+                )
+                self.store.record_event(
+                    transaction.id,
+                    "OUTCOME_UNKNOWN",
+                    {"execution_state": exc.execution_state},
+                )
             target_state = classify_execution_outcome(exc)
+
+        if target_state is TransactionState.INDETERMINATE:
+            self.store.record_event(
+                transaction.id,
+                "INDETERMINATE",
+                {"reason": "execution_outcome_unknown"},
+            )
 
         return self.store.update_transaction_status(
             transaction.id,
@@ -292,6 +324,15 @@ class TransactionExecutor:
                 dispatch_arguments["demo_allow_duplicate"] = True
 
             try:
+                self.store.record_event(
+                    transaction.id,
+                    "WRITE_DISPATCHED",
+                    {
+                        "attempt": attempt,
+                        "executor": "naive",
+                        "demo_allow_duplicate": demo_allow_duplicate,
+                    },
+                )
                 result = await self.otari_client.execute(
                     server_id=self.server_id,
                     tool_name=transaction.tool,
@@ -306,6 +347,25 @@ class TransactionExecutor:
             except OtariMCPError as exc:
                 request_id = exc.request_id
                 target_state = classify_execution_outcome(exc)
+                if isinstance(exc, OtariMCPOutcomeUnknownError):
+                    self.store.record_event(
+                        transaction.id,
+                        "EXECUTION_RESPONSE_LOST",
+                        {
+                            "attempt": attempt,
+                            "execution_state": exc.execution_state,
+                            "code": exc.code,
+                            "request_id": exc.request_id,
+                        },
+                    )
+                    self.store.record_event(
+                        transaction.id,
+                        "OUTCOME_UNKNOWN",
+                        {
+                            "attempt": attempt,
+                            "execution_state": exc.execution_state,
+                        },
+                    )
 
             self.store.record_naive_demo_attempt(
                 transaction.id,
@@ -319,6 +379,17 @@ class TransactionExecutor:
 
             if target_state is not TransactionState.INDETERMINATE:
                 break
+
+        if attempt > 1 and target_state is TransactionState.SUCCEEDED:
+            self.store.record_event(
+                transaction.id,
+                "INDETERMINATE",
+                {
+                    "reason": "naive_retry_after_unknown_outcome",
+                    "write_attempts": attempt,
+                },
+            )
+            target_state = TransactionState.INDETERMINATE
 
         return self.store.update_transaction_status(
             transaction.id,

@@ -15,10 +15,44 @@ function ErrorMessage({ error }) {
   return error ? <div className="alert error">{error instanceof ApiError ? error.message : error.message || 'Request failed.'}</div> : null
 }
 
+const EVENT_LABELS = {
+  APPROVAL_DECISION_RECORDED: 'Human approval',
+  WRITE_DISPATCHED: 'Write dispatched',
+  EXECUTION_RESPONSE_LOST: 'Lost response',
+  OUTCOME_UNKNOWN: 'OUTCOME_UNKNOWN',
+  INDETERMINATE: 'INDETERMINATE',
+  RECONCILIATION_STARTED: 'Read-only reconciliation started',
+  RECONCILIATION_PROBE_COMPLETED: 'Read-only probe completed',
+  RECONCILIATION_EVIDENCE_RECORDED: 'Evidence recorded',
+  RECONCILED_SUCCEEDED: 'SUCCEEDED — reconciled',
+  NAIVE_DEMO_EXECUTION_ATTEMPT: 'Naive write attempt',
+  TRANSACTION_STATUS_CHANGED: 'Transaction state changed',
+}
+
+function ExecutionTimeline({ events = [] }) {
+  return <section className="chaos-timeline"><div className="panel-heading"><div><p className="eyebrow">EXECUTION TIMELINE</p><h2>Backend evidence</h2></div></div>{events.length === 0 ? <p className="muted">Waiting for execution events.</p> : <ol>{events.map((event) => <li key={`${event.seq}-${event.id}`}><span className="timeline-dot" /><div><strong>{EVENT_LABELS[event.type] || event.type}</strong><time>{new Date(event.ts).toLocaleTimeString()}</time><small><code>{event.type}</code>{event.payload?.reason ? ` — ${event.payload.reason}` : ''}</small></div></li>)}</ol>}</section>
+}
+
+function RecoverySummary({ run }) {
+  const transaction = run?.transaction
+  const events = run?.observability?.events || []
+  const evidence = run?.observability?.reconciliation_evidence?.evidence
+  const verified = run?.observability?.ledger_verification?.valid
+  const safeRecovery = transaction?.status === 'SUCCEEDED'
+    && run?.observability?.write_attempts === 1
+    && events.some((event) => event.type === 'EXECUTION_RESPONSE_LOST')
+    && run?.observability?.read_only_probes > 0
+    && evidence?.is_closed === true
+    && evidence?.marker_count === 1
+    && verified === true
+  if (!safeRecovery) return null
+  return <div className="recovery-explanation"><strong>Response lost after the external operation.</strong><span>TrustRail did not retry the write. It queried GitHub using a read-only probe and recovered the actual outcome.</span><small>Write was attempted once. Its response was lost. TrustRail did not retry. A read-only probe verified the external result.</small></div>
+}
+
 function ResultCard({ title, run, onApprove, busy }) {
   const transaction = run?.transaction
   if (!run) return <article className="chaos-result muted"><span>{title}</span><strong>Waiting for demo</strong></article>
-  return <article className="chaos-result"><div className="result-title"><span>{title}</span><b className={`result-${String(transaction?.status || '').toLowerCase()}`}>{transaction?.status || 'UNKNOWN'}</b></div><dl><div><dt>Issue state</dt><dd>{run.issue?.state?.toUpperCase() || '—'}</dd></div><div><dt>Markers</dt><dd>{run.issue?.marker_count ?? '—'}</dd></div><div><dt>Comments</dt><dd>{run.issue?.total_comments ?? '—'}</dd></div><div><dt>Transaction</dt><dd><code>{transaction?.id || '—'}</code></dd></div></dl>{transaction?.status === 'PENDING_APPROVAL' && <button className="primary" disabled={busy} onClick={() => onApprove(transaction)}>{busy ? 'Approving…' : 'Approve & execute →'}</button>}</article>
+  return <article className="chaos-result"><div className="result-title"><span>{title}</span><b className={`result-${String(transaction?.status || '').toLowerCase()}`}>{transaction?.status || 'UNKNOWN'}</b></div><dl><div><dt>Issue state</dt><dd>{run.issue?.state?.toUpperCase() || '—'}</dd></div><div><dt>Markers</dt><dd>{run.issue?.marker_count ?? '—'}</dd></div><div><dt>Comments</dt><dd>{run.issue?.total_comments ?? '—'}</dd></div><div><dt>Write attempts</dt><dd>{run.observability?.write_attempts ?? '—'}</dd></div><div><dt>Read-only probes</dt><dd>{run.observability?.read_only_probes ?? '—'}</dd></div><div><dt>Ledger</dt><dd>{run.observability?.ledger_verification?.valid ? 'VERIFIED' : '—'}</dd></div><div><dt>Transaction</dt><dd><code>{transaction?.id || '—'}</code></dd></div></dl>{transaction?.status === 'PENDING_APPROVAL' && <button className="primary" disabled={busy} onClick={() => onApprove(transaction)}>{busy ? 'Approving…' : 'Approve & execute →'}</button>}<RecoverySummary run={run} /><ExecutionTimeline events={run.observability?.events} /></article>
 }
 
 export default function ChaosScreen() {
@@ -74,6 +108,8 @@ export default function ChaosScreen() {
     if (executor === 'naive' && !window.confirm('Naive execution intentionally demonstrates unsafe retry behavior and may create duplicate GitHub comments. Continue?')) return
     setBusy(true); setError(null)
     try {
+      // The MCP fault controller is consume-once; arm it for every demo run.
+      await chaosApi.fault(fault)
       const result = await chaosApi.run({ issue_number: Number(issueNumber), note, executor })
       if (executor === 'naive') setNaiveRun(result); else setRun(result)
       setIssueState(result.issue)
