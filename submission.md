@@ -13,3 +13,4 @@ Find all P1 and P2 issues that have been inactive for at least 6 days and close 
 
 
 
+I want to close stale  issues which are labeled as P1 or P2 in the configured repository and are inactive since 10 days and does not contain bug or critical labels.Generate a policy for it.It should be a vulnerability.

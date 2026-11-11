@@ -28,17 +28,19 @@ async def get_tools(request: Request) -> dict:
         data = await client.tools()
     except Exception as exc:
         raise _upstream_error(exc) from exc
-    raw_tools = data.get("tools", [])
+    raw_tools = data.get("tools", data.get("data", []))
     tools = []
     for item in raw_tools if isinstance(raw_tools, list) else []:
         if not isinstance(item, dict):
             continue
-        name = item.get("name") or item.get("type")
+        name = item.get("name") or item.get("id") or item.get("type")
         if name in {"otari_web_search", "otari_web_fetch"}:
             tools.append({
                 "name": name,
                 "available": item.get("available"),
-                "unavailable_reason": item.get("unavailable_reason") or item.get("reason"),
+                "unavailable_reason": (
+                    item.get("unavailable_reason") or item.get("reason")
+                ),
             })
     return {"tools": tools, "planner_model": request.app.state.settings.tr_planner_model}
 

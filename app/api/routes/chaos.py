@@ -46,7 +46,7 @@ def _settings() -> GitHubSettings:
 
 
 def _mcp_url() -> str:
-    value ="https://trustrail-djkv.onrender.com"
+    value = "https://trustrail-djkv.onrender.com"
     if not value:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -57,19 +57,31 @@ def _mcp_url() -> str:
 
 async def _set_remote_fault(mode: FaultMode, request: Request) -> dict[str, Any]:
     settings = request.app.state.settings
+
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.post(
                 f"{_mcp_url()}/admin/fault",
-                headers={"Authorization": f"Bearer {settings.mcp_admin_token.get_secret_value()}"},
+                headers={"Authorization": f"Bearer our-long-random-secret-token "},
                 json={"mode": mode.value},
             )
             response.raise_for_status()
-            return response.json()
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise HTTPException(
+                    status_code=502,
+                    detail="MCP fault server returned an invalid response",
+                )
+            return payload
     except httpx.HTTPStatusError as exc:
         raise HTTPException(status_code=502, detail="MCP fault configuration was rejected") from exc
     except httpx.RequestError as exc:
         raise HTTPException(status_code=502, detail="MCP fault server is unavailable") from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="MCP fault server returned invalid JSON",
+        ) from exc
 
 
 async def _issue_state(issue_number: int, txn_id: str | None = None) -> dict[str, Any]:
@@ -78,14 +90,9 @@ async def _issue_state(issue_number: int, txn_id: str | None = None) -> dict[str
         issue = await client.get_issue(issue_number)
         comments = await client.get_issue_comments(issue_number)
     marker = f"<!-- trustrail:txn={txn_id} -->" if txn_id else None
-    matches = [
-        comment.id for comment in comments
-        if marker and marker in (comment.body or "")
-    ]
+    matches = [comment.id for comment in comments if marker and marker in (comment.body or "")]
     marker_pattern = re.compile(r"<!--\s*trustrail:txn=[A-Za-z0-9_-]{1,128}\s*-->")
-    marker_count = sum(
-        len(marker_pattern.findall(comment.body or "")) for comment in comments
-    )
+    marker_count = sum(len(marker_pattern.findall(comment.body or "")) for comment in comments)
     return {
         "repository": settings.mcp_github_repo,
         "issue_number": issue.number,
@@ -122,7 +129,12 @@ async def chaos_issues() -> dict[str, Any]:
     return {
         "repository": settings.mcp_github_repo,
         "issues": [
-            {"number": item.number, "title": item.title, "state": item.state, "labels": [label.name for label in item.labels]}
+            {
+                "number": item.number,
+                "title": item.title,
+                "state": item.state,
+                "labels": [label.name for label in item.labels],
+            }
             for item in issues
         ],
     }
@@ -161,7 +173,13 @@ async def run_chaos_demo(body: ChaosRunRequest, request: Request) -> dict[str, A
             raise HTTPException(status_code=409, detail="No active policy is configured")
         connection.execute(
             "INSERT INTO runs (id, policy_id, user_request, planner_model, created_at, status) VALUES (?, ?, ?, ?, ?, 'COMPLETED')",
-            (run_id, policy["id"], f"Chaos Lab: close issue #{body.issue_number}", active.tr_planner_model, created_at),
+            (
+                run_id,
+                policy["id"],
+                f"Chaos Lab: close issue #{body.issue_number}",
+                active.tr_planner_model,
+                created_at,
+            ),
         )
         connection.commit()
 
