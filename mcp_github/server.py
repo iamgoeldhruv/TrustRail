@@ -492,6 +492,7 @@ def create_mcp_app():
         allow_origins=[
             "https://trustrail-production-8639.up.railway.app",
             "http://localhost:5173",
+            "https://trustrail-production-829b805b.up.railway.app/"
         ],
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=[
