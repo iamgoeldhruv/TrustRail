@@ -14,6 +14,7 @@ from app.otari.exceptions import (
     OtariTimeoutError,
 )
 from app.otari.guardrails import OtariGuardrailResult, parse_guardrail_header
+from app.otari.research import OtariToolCall, parse_otari_tool_calls
 from app.otari.response_validation import _is_valid_completion
 
 
@@ -23,6 +24,7 @@ class OtariClient:
         self.base_url = settings.otari_base_url.rstrip("/")
         self.api_key = api_key or settings.otari_api_key
         self.timeout = settings.otari_timeout
+        self.last_request_id: str | None = None
 
         self.http_client = httpx.AsyncClient(
             timeout=self.timeout,
@@ -69,6 +71,14 @@ class OtariClient:
             max_tokens=max_tokens,
         )
         return data, guardrails
+
+    @staticmethod
+    def extract_tool_calls(response: dict[str, Any]) -> list[OtariToolCall]:
+        return parse_otari_tool_calls(response)
+
+    async def tools(self) -> dict[str, Any]:
+        """Return the authenticated workspace's native tool availability."""
+        return await self.get_json("tools")
 
     async def _chat_completion_request(
         self,
@@ -173,6 +183,7 @@ class OtariClient:
             )
 
         guardrails = parse_guardrail_header(response.headers.get("Otari-Guardrails"))
+        self.last_request_id = response.headers.get("Otari-Request-ID")
         return response, data, guardrails
 
     async def get_json(

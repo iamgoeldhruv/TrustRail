@@ -1,4 +1,5 @@
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +18,8 @@ class Settings(BaseSettings):
     tr_agent_max_tool_calls: int = 16
     tr_agent_max_completion_tokens: int = 512
     tr_agent_token_budget: int = 8192
+    tr_research_search_max_uses: int = Field(default=3, ge=1, le=3)
+    tr_research_fetch_max_uses: int = Field(default=3, ge=1, le=3)
     # tr_compiler_model: str
 
     # # TrustRail configuration

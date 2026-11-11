@@ -10,4 +10,7 @@ export const otariApi = {
   series(bucket = 'day', options = {}) {
     return api.get(`/api/v1/integrations/otari/usage/series?bucket=${encodeURIComponent(bucket)}`, options)
   },
+  tools(options = {}) {
+    return api.get('/api/v1/integrations/otari/tools', options)
+  },
 }

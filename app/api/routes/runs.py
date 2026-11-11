@@ -66,6 +66,11 @@ def _workflow_projection(
         for event in events
         if event.type in {"RUN_ACTIVITY", "READ_TOOL_CALL"}
     ]
+    research_events = [
+        event.model_dump(mode="json")
+        for event in events
+        if event.type.startswith("WEB_")
+    ]
     guardrail_events = [
         _guardrail_projection_event(event)
         for event in events
@@ -165,6 +170,20 @@ def _workflow_projection(
                     )
                 ),
                 "details": {"events": guardrail_events, "latest": latest_guardrail},
+            },
+            {
+                "id": "research",
+                "title": "External evidence research",
+                "status": (
+                    research_events[-1]["payload"].get("status", "COMPLETED")
+                    if research_events else "NOT_REQUIRED"
+                ),
+                "summary": (
+                    "No external research was required."
+                    if not research_events
+                    else f"{len(research_events)} research event(s) persisted."
+                ),
+                "details": {"events": research_events},
             },
             {
                 "id": "proposal",
@@ -369,6 +388,11 @@ async def _execute_run(
             # A telemetry failure must not turn a safe planner result into an unsafe one.
             pass
 
+    def research_event(event_type: str, payload: dict[str, Any]) -> None:
+        app.state.ledger_store.append_event(
+            LedgerEventCreate(run_id=run_id, type=event_type, payload=payload)
+        )
+
     try:
         orchestrator = AgentOrchestrator(
             client=app.state.planner_client,
@@ -377,6 +401,7 @@ async def _execute_run(
             model=planner_model,
             progress_callback=progress,
             guardrail_callback=guardrail_event,
+            research_callback=research_event,
         )
         result = await orchestrator.run(run_id=run_id, user_request=user_request)
         _set_run_result(db_path, run_id, result=result)
