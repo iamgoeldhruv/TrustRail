@@ -43,6 +43,22 @@ function ProposalCard({ proposal, onDecision, busy }) {
 function StageDetails({ stage }) {
   const details = stage.details || {}
   if (stage.id === 'planning') return <TechnicalActivity events={details.events} />
+  if (stage.id === 'guardrail') {
+    const result = details.latest
+    if (!result) return <p className="muted">No Otari guardrail result was recorded.</p>
+    return <div className="detail-grid">
+      <div className="detail-wide"><span>{result.status === 'BLOCKED' ? 'PROMPT INJECTION DETECTED' : result.status === 'UNAVAILABLE' ? 'GUARDRAIL ENFORCEMENT UNAVAILABLE' : result.status === 'PASSED' ? 'PROMPT-INJECTION CHECK PASSED' : 'GUARDRAIL STATUS UNKNOWN'}</span><strong>{result.status === 'BLOCKED' ? 'Otari blocked this planner inference. No actionable proposal was accepted.' : result.status === 'UNAVAILABLE' ? 'TrustRail refused to continue because mandatory Otari guardrail evaluation could not be completed.' : result.status === 'PASSED' ? 'Otari allowed inference to continue. TrustRail still evaluates every proposed action independently.' : 'TrustRail did not infer a verdict beyond the upstream result.'}</strong></div>
+      {[
+        ['Profile', result.profile],
+        ['Mode', result.mode],
+        ['Otari request ID', result.request_id],
+        ['HTTP status', result.http_status],
+        ['Timestamp', result.occurred_at],
+        ['Reason', result.reason],
+        ['Routing policy', result.routing_policy],
+      ].filter(([, value]) => value !== null && value !== undefined && value !== '').map(([label, value]) => <div key={label}><span>{label}</span><strong>{label === 'Timestamp' ? new Date(value).toLocaleString() : String(value)}</strong></div>)}
+    </div>
+  }
   if (stage.id === 'validation') return <div className="detail-grid"><div><span>Decision</span><strong><StatusBadge status={details.decision || 'PENDING'} /></strong></div><div><span>Policy</span><strong>{details.policy_id || 'Not evaluated'}{details.policy_version ? ` · v${details.policy_version}` : ''}</strong></div><div className="detail-wide"><span>Independent evaluations</span>{details.evaluations?.length ? details.evaluations.map((evaluation) => <div className="evaluation-row" key={evaluation.transaction_id}><strong><StatusBadge status={evaluation.decision || 'PENDING'} /></strong><code>{evaluation.transaction_id}</code><span>{evaluation.reasons?.join(' ') || 'No reasons returned.'}</span></div>) : <p className="muted">No evaluated proposal facts persisted.</p>}</div></div>
   if (stage.id === 'verification') return <div className="detail-grid"><div><span>Ledger integrity</span><strong><StatusBadge status={details.ledger_verification?.valid ? 'VERIFIED' : 'NOT_VERIFIED'} /></strong></div><div><span>Events checked</span><strong>{details.ledger_verification?.events_checked ?? 0}</strong></div><div><span>Ledger events</span><strong>{details.ledger_event_count ?? 0}</strong></div>{details.reconciliation?.length > 0 && <div className="detail-wide"><span>Reconciliation evidence</span><pre>{JSON.stringify(details.reconciliation, null, 2)}</pre></div>}</div>
   return <div className="detail-grid">{Object.entries(details).filter(([, value]) => value !== null && value !== undefined && value !== '').map(([key, value]) => <div key={key}><span>{key.replaceAll('_', ' ')}</span><strong>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</strong></div>)}</div>

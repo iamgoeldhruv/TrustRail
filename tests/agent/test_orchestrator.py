@@ -1,6 +1,7 @@
 import pytest
 
 from app.agent.orchestrator import AgentOrchestrator
+from app.otari.exceptions import OtariGuardrailBlockedError
 
 
 class FakeClient:
@@ -11,6 +12,15 @@ class FakeClient:
     async def chat_completion(self, **kwargs):
         self.calls.append(kwargs)
         return next(self.responses)
+
+
+class GuardrailBlockedClient:
+    async def chat_completion_with_metadata(self, **kwargs):
+        raise OtariGuardrailBlockedError(
+            "blocked",
+            status_code=403,
+            request_id="req-1",
+        )
 
 
 class FakeDispatcher:
@@ -61,6 +71,24 @@ async def test_final_response_uses_configured_model_and_tools():
     assert client.calls[0]["model"] == "planner"
     assert client.calls[0]["max_tokens"] == 77
     assert len(client.calls[0]["tools"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_guardrail_block_terminates_without_dispatching_tools():
+    events = []
+    dispatcher = FakeDispatcher()
+    result = await AgentOrchestrator(
+        client=GuardrailBlockedClient(),
+        dispatcher=dispatcher,
+        model="planner",
+        guardrail_callback=events.append,
+    ).run(run_id="run-1", user_request="inspect issues")
+
+    assert result.response is None
+    assert result.termination_reason == "guardrail_blocked"
+    assert dispatcher.calls == []
+    assert events[0].status.value == "BLOCKED"
+    assert events[0].request_id == "req-1"
 
 
 @pytest.mark.asyncio
