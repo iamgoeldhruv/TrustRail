@@ -242,7 +242,6 @@ class TransactionStore:
                         },
                     ),
                 )
-
                 connection.commit()
 
             except Exception:
@@ -461,6 +460,36 @@ class TransactionStore:
                 connection.rollback()
                 raise
 
+    def record_event(
+        self,
+        transaction_id: UUID | str,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        """Append an operational event without changing transaction state."""
+        transaction_id = str(transaction_id)
+        with get_connection(self.db_path) as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT id FROM transactions WHERE id = ?",
+                    (transaction_id,),
+                ).fetchone()
+                if row is None:
+                    raise TransactionNotFoundError(transaction_id)
+                self.ledger_store.append_event_in_transaction(
+                    connection,
+                    LedgerEventCreate(
+                        txn_id=transaction_id,
+                        type=event_type,
+                        payload=payload or {},
+                    ),
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+
     def record_naive_demo_attempt(
         self,
         transaction_id: UUID | str,
@@ -530,7 +559,6 @@ class TransactionStore:
                         },
                     ),
                 )
-
                 connection.commit()
 
             except Exception:
@@ -1222,6 +1250,17 @@ class TransactionStore:
                         },
                     ),
                 )
+                self.ledger_store.append_event_in_transaction(
+                    connection,
+                    LedgerEventCreate(
+                        txn_id=transaction_id,
+                        type="RECONCILIATION_STARTED",
+                        payload={
+                            "from_status": original_state.value,
+                            "to_status": target_state.value,
+                        },
+                    ),
+                )
 
                 connection.commit()
                 return original_state
@@ -1316,6 +1355,25 @@ class TransactionStore:
                     connection,
                     LedgerEventCreate(
                         txn_id=transaction_id,
+                        type="RECONCILIATION_PROBE_COMPLETED",
+                        payload={
+                            "outcome": next_state.value,
+                            "otari_request_id": otari_request_id,
+                        },
+                    ),
+                )
+                self.ledger_store.append_event_in_transaction(
+                    connection,
+                    LedgerEventCreate(
+                        txn_id=transaction_id,
+                        type="RECONCILIATION_EVIDENCE_RECORDED",
+                        payload={"evidence": evidence},
+                    ),
+                )
+                self.ledger_store.append_event_in_transaction(
+                    connection,
+                    LedgerEventCreate(
+                        txn_id=transaction_id,
                         type="RECONCILIATION_COMPLETED",
                         payload={
                             "outcome": next_state.value,
@@ -1325,6 +1383,15 @@ class TransactionStore:
                         },
                     ),
                 )
+                if next_state is TransactionState.SUCCEEDED:
+                    self.ledger_store.append_event_in_transaction(
+                        connection,
+                        LedgerEventCreate(
+                            txn_id=transaction_id,
+                            type="RECONCILED_SUCCEEDED",
+                            payload={"reason": reason},
+                        ),
+                    )
 
                 connection.commit()
 
@@ -1410,6 +1477,19 @@ class TransactionStore:
                             "from_status": current_state.value,
                             "to_status": next_state.value,
                             "reason": "reconciliation_probe_failed",
+                        },
+                    ),
+                )
+
+                _ = self.ledger_store.append_event_in_transaction(
+                    connection,
+                    LedgerEventCreate(
+                        txn_id=transaction_id,
+                        type="RECONCILIATION_PROBE_COMPLETED",
+                        payload={
+                            "completed": False,
+                            "error_code": error_code,
+                            "otari_request_id": otari_request_id,
                         },
                     ),
                 )
