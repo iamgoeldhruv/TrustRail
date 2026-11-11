@@ -42,6 +42,17 @@ def _transaction_payload(transaction: Transaction) -> dict[str, Any]:
     return transaction.model_dump(mode="json")
 
 
+def _guardrail_projection_event(event: Any) -> dict[str, Any]:
+    """Expose guardrail payload fields alongside persisted ledger metadata."""
+    event_data = event.model_dump(mode="json")
+    payload = event_data.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+    projected = {**event_data, **payload}
+    projected["status"] = payload.get("status", "UNKNOWN")
+    return projected
+
+
 def _workflow_projection(
     *,
     run: dict[str, Any],
@@ -56,11 +67,14 @@ def _workflow_projection(
         if event.type in {"RUN_ACTIVITY", "READ_TOOL_CALL"}
     ]
     guardrail_events = [
-        event.model_dump(mode="json")
+        _guardrail_projection_event(event)
         for event in events
         if event.type.startswith("GUARDRAIL_")
     ]
     latest_guardrail = guardrail_events[-1] if guardrail_events else None
+    latest_guardrail_status = (
+        latest_guardrail.get("status", "UNKNOWN") if latest_guardrail else None
+    )
     proposal = transactions[0] if transactions else None
     decisions = sorted(
         {item.authorization_decision for item in transactions if item.authorization_decision}
@@ -130,25 +144,22 @@ def _workflow_projection(
                 "id": "guardrail",
                 "title": "Otari prompt-injection guardrail",
                 "status": (
-                    latest_guardrail["status"]
+                    latest_guardrail_status
                     if latest_guardrail
                     else ("NOT_STARTED" if not terminal else "UNKNOWN")
                 ),
                 "summary": (
                     "Planner inference was blocked before any proposal could be accepted."
-                    if latest_guardrail
-                    and latest_guardrail["status"] == "BLOCKED"
+                    if latest_guardrail_status == "BLOCKED"
                     else (
                         (
                             "Mandatory guardrail enforcement was unavailable; "
                             "planner inference stopped."
                         )
-                        if latest_guardrail
-                        and latest_guardrail["status"] == "UNAVAILABLE"
+                        if latest_guardrail_status == "UNAVAILABLE"
                         else (
                             "Otari allowed planner inference to continue."
-                            if latest_guardrail
-                            and latest_guardrail["status"] == "PASSED"
+                            if latest_guardrail_status == "PASSED"
                             else "No guardrail result was recorded."
                         )
                     )

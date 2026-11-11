@@ -693,6 +693,82 @@ trustrail run \
   --policy "Only close GitHub issues inactive for at least 30 days and with no P0 or P1 label." \
   --request "Find stale issues in the configured repository and propose closing eligible ones."
 ```
+```mermaid
+%%{init: {"theme": "base", "flowchart": {"nodeSpacing": 60, "rankSpacing": 90, "padding": 24}, "themeVariables": {"fontFamily": "Inter, sans-serif", "fontSize": "20px", "lineColor": "#A7B5C8", "primaryTextColor": "#E6EDF7", "background": "#0B1120"}}}%%
+flowchart LR
+    UI["<b>TrustRail Console</b><br/>Policy · Runs<br/>Approvals · Ledger"]
+
+    subgraph CORE["TrustRail backend"]
+        direction TB
+        subgraph PROPOSE["Propose and verify"]
+            direction LR
+            AGENT["<b>Agent Planner</b><br/>proposes only"]
+            FACTS["<b>Fact Resolver</b><br/>read-only ground truth"]
+        end
+        ENGINE["<b>Authorization Engine</b><br/>deterministic · fails closed"]
+        APPROVE["<b>Human Approval</b><br/>bound to args, facts,<br/>policy and server revision"]
+        subgraph EXECUTE["Execute and recover"]
+            direction LR
+            TXN["<b>Transaction Executor</b><br/>write-ahead · single attempt"]
+            RECON["<b>Reconciler</b><br/>read-only probe"]
+        end
+        LEDGER[("<b>Audit Ledger</b><br/>append-only · hash-chained")]
+
+        AGENT -->|proposal| ENGINE
+        FACTS -->|facts| ENGINE
+        ENGINE -->|requires approval| APPROVE
+        APPROVE -->|approved| TXN
+        TXN -.->|outcome unknown| RECON
+        RECON -.->|evidence| TXN
+        ENGINE --> LEDGER
+        TXN --> LEDGER
+        RECON --> LEDGER
+    end
+
+    subgraph OTARI["OTARI  ·  hosted gateway"]
+        direction TB
+        INFER["<b>Inference and routing</b><br/>planner and compiler policies"]
+        BUDGET["<b>Scoped keys and budgets</b><br/>agent-run key"]
+        MCPX["<b>MCP registry and execute</b><br/>allowlist · server_revision<br/>typed execution_state"]
+        INFER ~~~ BUDGET
+        BUDGET ~~~ MCPX
+    end
+
+    MCP["<b>GitHub MCP Server</b><br/>with fault injection"]
+    GH["<b>GitHub Sandbox Repo</b>"]
+
+    UI --> CORE
+    CORE ==>|LLM calls| INFER
+    CORE ==>|"fact reads · execute once · probe"| MCPX
+    MCPX --> MCP --> GH
+
+    classDef agent fill:#0F172A,stroke:#60A5FA,stroke-width:3px,color:#E6EDF7
+    classDef facts fill:#0F172A,stroke:#60A5FA,stroke-width:3px,stroke-dasharray:6 4,color:#E6EDF7
+    classDef engine fill:#0F172A,stroke:#38BDF8,stroke-width:3px,color:#E6EDF7
+    classDef approval fill:#0F172A,stroke:#FBBF24,stroke-width:3px,color:#E6EDF7
+    classDef exec fill:#0F172A,stroke:#A78BFA,stroke-width:3px,color:#E6EDF7
+    classDef recon fill:#0F172A,stroke:#60A5FA,stroke-width:3px,stroke-dasharray:6 4,color:#E6EDF7
+    classDef ledger fill:#0F172A,stroke:#34D399,stroke-width:3px,color:#E6EDF7
+    classDef otari fill:#0C3B5A,stroke:#7DD3FC,stroke-width:4px,color:#FFFFFF,font-size:22px
+    classDef external fill:#111C2F,stroke:#344963,stroke-width:2px,color:#A7B5C8
+    classDef ui fill:#17243A,stroke:#344963,stroke-width:2px,color:#E6EDF7
+
+    class AGENT agent
+    class FACTS facts
+    class ENGINE engine
+    class APPROVE approval
+    class TXN exec
+    class RECON recon
+    class LEDGER ledger
+    class INFER,BUDGET,MCPX otari
+    class MCP,GH external
+    class UI ui
+
+    style CORE fill:#0B1120,stroke:#26364D,stroke-width:2px,color:#A7B5C8
+    style PROPOSE fill:#0F172A,stroke:#26364D,color:#718198
+    style EXECUTE fill:#0F172A,stroke:#26364D,color:#718198
+    style OTARI fill:#082F49,stroke:#38BDF8,stroke-width:5px,color:#7DD3FC,font-size:26px
+```
 
 ### Policy Dry-run
 
