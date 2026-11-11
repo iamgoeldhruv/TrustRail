@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import re
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -12,9 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.agent.proposal_service import ProposalService
 from app.db.connection import get_connection
-from app.txn.executor import ApprovalRequiredError, TransactionExecutionError
 from app.otari.exceptions import OtariMCPError, OtariMCPNotStartedError
-from app.txn.states import TransactionState
+from app.txn.executor import ApprovalRequiredError, TransactionExecutionError
 from mcp_github.client import GitHubClient
 from mcp_github.config import GitHubSettings
 from mcp_github.fault_injection import FaultMode, fault_controller
@@ -63,11 +61,7 @@ async def _set_remote_fault(mode: FaultMode, request: Request) -> dict[str, Any]
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.post(
                 f"{_mcp_url()}/admin/fault",
-                headers={
-                    "Authorization": (
-                        f"Bearer {settings.mcp_admin_token}"
-                    )
-                },
+                headers={"Authorization": f"Bearer {settings.mcp_admin_token}"},
                 json={"mode": mode.value},
             )
             response.raise_for_status()
@@ -79,10 +73,15 @@ async def _set_remote_fault(mode: FaultMode, request: Request) -> dict[str, Any]
                 )
             return payload
     except httpx.HTTPStatusError as exc:
-        raise HTTPException(status_code=502, detail="MCP fault configuration was rejected") from exc
+        raise HTTPException(
+            status_code=502,
+            detail="MCP fault configuration was rejected",
+        ) from exc
     except httpx.RequestError as exc:
-        print(exc)
-        raise HTTPException(status_code=502, detail="MCP fault server is unavailable") from exc
+        raise HTTPException(
+            status_code=502,
+            detail="MCP fault server is unavailable",
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=502,
@@ -178,7 +177,10 @@ async def run_chaos_demo(body: ChaosRunRequest, request: Request) -> dict[str, A
         if policy is None:
             raise HTTPException(status_code=409, detail="No active policy is configured")
         connection.execute(
-            "INSERT INTO runs (id, policy_id, user_request, planner_model, created_at, status) VALUES (?, ?, ?, ?, ?, 'COMPLETED')",
+            (
+                "INSERT INTO runs (id, policy_id, user_request, planner_model, "
+                "created_at, status) VALUES (?, ?, ?, ?, ?, 'COMPLETED')"
+            ),
             (
                 run_id,
                 policy["id"],
