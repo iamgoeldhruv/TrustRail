@@ -87,10 +87,16 @@ async def retry_transaction(
         if transaction.status is TransactionState.FAILED_SAFE:
             store.prepare_failed_safe_retry(transaction_id)
 
-        elif transaction.status is TransactionState.APPROVED:
+        elif (
+            transaction.status is TransactionState.APPROVED
+            and store.has_not_executed_retry_preparation(transaction_id)
+        ):
             store.prepare_approved_not_executed_retry(transaction_id)
 
-        elif transaction.status is not TransactionState.PRECHECK:
+        elif transaction.status not in {
+            TransactionState.APPROVED,
+            TransactionState.PRECHECK,
+        }:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=(
