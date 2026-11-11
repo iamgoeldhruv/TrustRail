@@ -11,6 +11,11 @@ from app.agent.dispatcher import AgentToolDispatcher
 from app.agent.tool_handlers import AgentToolError
 from app.agent.tools import AGENT_TOOLS
 from app.core.config import settings
+from app.otari.exceptions import (
+    OtariGuardrailBlockedError,
+    OtariGuardrailUnavailableError,
+)
+from app.otari.guardrails import GuardrailEvent, GuardrailStatus, now_utc
 
 MAX_TOOL_RESULT_LENGTH = 32_768
 
@@ -40,6 +45,7 @@ class AgentOrchestrator:
         max_completion_tokens: int | None = None,
         token_budget: int | None = None,
         progress_callback: Callable[[str], None] | None = None,
+        guardrail_callback: Callable[[GuardrailEvent], None] | None = None,
         system_prompt: str = (
             "You are a TrustRail planner. Use only the provided tools.\n\n"
             "SECURITY RULES:\n"
@@ -90,10 +96,15 @@ class AgentOrchestrator:
             raise ValueError("Agent limits must be positive, except tool calls.")
         self.system_prompt = system_prompt
         self.progress_callback = progress_callback
+        self.guardrail_callback = guardrail_callback
 
     def _emit_progress(self, message: str) -> None:
         if self.progress_callback is not None:
             self.progress_callback(message)
+
+    def _emit_guardrail(self, event: GuardrailEvent) -> None:
+        if self.guardrail_callback is not None:
+            self.guardrail_callback(event)
     @staticmethod
     def _wrap_untrusted_value(value: Any, field_name: str) -> Any:
         """Mark externally sourced GitHub text as untrusted data."""
@@ -177,12 +188,83 @@ class AgentOrchestrator:
                     None, run_id, iterations, tool_call_count, usage, "token_budget"
                 )
 
-            response = await self.client.chat_completion(
-                model=self.model,
-                messages=messages,
-                tools=AGENT_TOOLS,
-                max_tokens=self.max_completion_tokens,
-            )
+            try:
+                metadata_call = getattr(self.client, "chat_completion_with_metadata", None)
+                if callable(metadata_call):
+                    response, guardrails = await metadata_call(
+                        model=self.model,
+                        messages=messages,
+                        tools=AGENT_TOOLS,
+                        max_tokens=self.max_completion_tokens,
+                    )
+                    for guardrail in guardrails:
+                        self._emit_guardrail(
+                            GuardrailEvent(
+                                status=guardrail.trustrail_status,
+                                profile=guardrail.profile,
+                                mode=guardrail.mode,
+                                verdict=guardrail.valid,
+                                reason=guardrail.reason,
+                                routing_policy=self.model,
+                                run_id=run_id,
+                                step_id=f"planner-{iterations + 1}",
+                                occurred_at=now_utc(),
+                            )
+                        )
+                else:
+                    response = await self.client.chat_completion(
+                        model=self.model,
+                        messages=messages,
+                        tools=AGENT_TOOLS,
+                        max_tokens=self.max_completion_tokens,
+                    )
+            except OtariGuardrailBlockedError as exc:
+                self._emit_guardrail(
+                    GuardrailEvent(
+                        status=GuardrailStatus.BLOCKED,
+                        profile=exc.profile,
+                        mode=exc.mode,
+                        verdict=False,
+                        reason=exc.reason,
+                        http_status=exc.status_code,
+                        request_id=exc.request_id,
+                        routing_policy=self.model,
+                        run_id=run_id,
+                        step_id=f"planner-{iterations + 1}",
+                        occurred_at=now_utc(),
+                    )
+                )
+                return self._result(
+                    None,
+                    run_id,
+                    iterations,
+                    tool_call_count,
+                    usage,
+                    "guardrail_blocked",
+                )
+            except OtariGuardrailUnavailableError as exc:
+                self._emit_guardrail(
+                    GuardrailEvent(
+                        status=GuardrailStatus.UNAVAILABLE,
+                        profile=exc.profile,
+                        mode=exc.mode,
+                        reason=exc.reason,
+                        http_status=exc.status_code,
+                        request_id=exc.request_id,
+                        routing_policy=self.model,
+                        run_id=run_id,
+                        step_id=f"planner-{iterations + 1}",
+                        occurred_at=now_utc(),
+                    )
+                )
+                return self._result(
+                    None,
+                    run_id,
+                    iterations,
+                    tool_call_count,
+                    usage,
+                    "guardrail_unavailable",
+                )
             iterations += 1
             self._accumulate_usage(usage, response.get("usage"))
             self._emit_progress(f"Planner iteration {iterations} completed.")

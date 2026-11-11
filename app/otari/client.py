@@ -8,9 +8,12 @@ from app.otari.exceptions import (
     OtariAPIError,
     OtariAuthenticationError,
     OtariConnectionError,
+    OtariGuardrailBlockedError,
+    OtariGuardrailUnavailableError,
     OtariResponseError,
     OtariTimeoutError,
 )
+from app.otari.guardrails import OtariGuardrailResult, parse_guardrail_header
 from app.otari.response_validation import _is_valid_completion
 
 
@@ -40,6 +43,42 @@ class OtariClient:
         max_tokens: int | None = None,
     ) -> dict:
 
+        _, data, _ = await self._chat_completion_request(
+            model=model,
+            messages=messages,
+            tools=tools,
+            tool_choice=tool_choice,
+            max_tokens=max_tokens,
+        )
+        return data
+
+    async def chat_completion_with_metadata(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        max_tokens: int | None = None,
+    ) -> tuple[dict[str, Any], list[OtariGuardrailResult]]:
+        _, data, guardrails = await self._chat_completion_request(
+            model=model,
+            messages=messages,
+            tools=tools,
+            tool_choice=tool_choice,
+            max_tokens=max_tokens,
+        )
+        return data, guardrails
+
+    async def _chat_completion_request(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        tool_choice: str | dict[str, Any] | None,
+        max_tokens: int | None,
+    ) -> tuple[httpx.Response, dict[str, Any], list[OtariGuardrailResult]]:
         url = f"{self.base_url}/chat/completions"
 
         payload: dict[str, Any] = {
@@ -66,7 +105,34 @@ class OtariClient:
                     "Otari rejected the API key."
                 )
 
-            _=response.raise_for_status()
+            if response.status_code >= 400:
+                body: Any = {}
+                if response.headers.get("content-type", "").startswith("application/json"):
+                    try:
+                        body = response.json()
+                    except ValueError:
+                        body = {}
+                code = body.get("code") if isinstance(body, dict) else None
+                request_id = response.headers.get("Otari-Request-ID")
+                if code == "guardrail_violation":
+                    raise OtariGuardrailBlockedError(
+                        "Otari blocked the planner inference.",
+                        status_code=response.status_code,
+                        code=code,
+                        request_id=request_id,
+                    )
+                if (
+                    response.status_code == 502
+                    and isinstance(code, str)
+                    and code.startswith("guardrail_")
+                ):
+                    raise OtariGuardrailUnavailableError(
+                        "Otari could not evaluate the mandatory guardrail.",
+                        status_code=response.status_code,
+                        code=code,
+                        request_id=request_id,
+                    )
+                response.raise_for_status()
 
         except httpx.TimeoutException as exc:
             raise OtariTimeoutError(
@@ -79,9 +145,18 @@ class OtariClient:
             ) from exc
 
         except httpx.HTTPStatusError as exc:
+            body = {}
+            if exc.response.headers.get("content-type", "").startswith("application/json"):
+                try:
+                    parsed = exc.response.json()
+                    body = parsed if isinstance(parsed, dict) else {}
+                except ValueError:
+                    body = {}
             raise OtariAPIError(
                 message=f"Otari returned HTTP {exc.response.status_code}",
                 status_code=exc.response.status_code,
+                code=body.get("code") if isinstance(body.get("code"), str) else None,
+                request_id=exc.response.headers.get("Otari-Request-ID"),
             ) from exc
 
         try:
@@ -97,7 +172,8 @@ class OtariClient:
                 "Otari returned an unexpected chat completion response."
             )
 
-        return data
+        guardrails = parse_guardrail_header(response.headers.get("Otari-Guardrails"))
+        return response, data, guardrails
 
     async def get_json(
         self,
@@ -124,6 +200,7 @@ class OtariClient:
             raise OtariAPIError(
                 message=f"Otari returned HTTP {exc.response.status_code}",
                 status_code=exc.response.status_code,
+                request_id=exc.response.headers.get("Otari-Request-ID"),
             ) from exc
 
         try:

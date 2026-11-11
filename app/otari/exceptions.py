@@ -1,4 +1,9 @@
 
+from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
 class OtariError(Exception):
     """Base exception for Otari client errors."""
 
@@ -10,9 +15,18 @@ class OtariAuthenticationError(OtariError):
 class OtariAPIError(OtariError):
     """Raised when Otari returns an unsuccessful HTTP response."""
 
-    def __init__(self, message: str, status_code: int) -> None:
+    def __init__(
+        self,
+        message: str,
+        status_code: int,
+        *,
+        code: str | None = None,
+        request_id: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.code = code
+        self.request_id = request_id
 
 
 class OtariConnectionError(OtariError):
@@ -25,6 +39,39 @@ class OtariTimeoutError(OtariError):
 
 class OtariResponseError(OtariError):
     """Raised when Otari returns an invalid response."""
+
+
+class OtariGuardrailError(OtariAPIError):
+    """Raised when Otari's mandatory guardrail prevents planner inference."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        code: str | None = None,
+        request_id: str | None = None,
+        profile: str = "prompt-injection",
+        mode: str = "block",
+        reason: str | None = None,
+    ) -> None:
+        super().__init__(
+            message=message,
+            status_code=status_code,
+            code=code,
+            request_id=request_id,
+        )
+        self.profile = profile
+        self.mode = mode
+        self.reason = reason
+
+
+class OtariGuardrailBlockedError(OtariGuardrailError):
+    """Raised for the documented 403 guardrail_violation response."""
+
+
+class OtariGuardrailUnavailableError(OtariGuardrailError):
+    """Raised when mandatory guardrail evaluation fails closed."""
 
 
 class OtariMCPError(OtariError):
@@ -95,11 +142,6 @@ class OtariMCPServerChangedError(OtariMCPNotStartedError):
 
 class OtariMCPResponseError(OtariMCPError):
     """Otari returned a malformed or unexpected MCP response."""
-
-from enum import StrEnum
-
-from pydantic import BaseModel, ConfigDict, Field
-
 
 class OtariExecutionState(StrEnum):
     """Execution certainty reported by Otari."""

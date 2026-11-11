@@ -34,6 +34,30 @@ responses; unavailable data is shown as unavailable rather than as zero. The
 configured base URL must match the key's Otari region (US or EU); a regional
 `421` or authentication failure indicates a base URL/key mismatch.
 
+### Otari prompt-injection guardrail
+
+The planner uses the existing organization-level Otari mandate for the
+`prompt-injection` profile. Otari applies an organization mandate
+automatically to chat-completions requests from its scoped workspace, so
+TrustRail does not add a duplicate request-level guardrail. The configured
+policy remains `block` with fail-closed (`on_unavailable: block`) behavior.
+
+TrustRail reads the documented `Otari-Guardrails` response header for
+successful planner calls and records `GUARDRAIL_EVALUATED` events. A documented
+`403` response with `code: guardrail_violation` is recorded as
+`GUARDRAIL_BLOCKED`; the planner terminates before tools or proposals can be
+created. A mandatory evaluation failure is recorded as `GUARDRAIL_ERROR` and
+also terminates planner inference. Authentication, rate-limit, generic
+upstream, and network errors remain distinct and are never mislabeled as
+prompt-injection detections.
+
+The Run screen exposes the guardrail checkpoint, upstream request ID, profile,
+mode, timestamp, and safe reason metadata when Otari supplies it. No API key,
+authorization header, issue body, hidden prompt, or model reasoning is stored
+in the ledger. A genuine detection can be verified only when Otari returns the
+documented `guardrail_violation` response; a generic upstream error is shown
+as unavailable/failed rather than as a detection.
+
 ### Project Setup & Scaffolding
 
 - [x] Initialized Python virtual environment and installed dependencies.

@@ -13,6 +13,7 @@ from app.agent.orchestrator import AgentOrchestrator, AgentRunResult
 from app.db.connection import get_connection
 from app.ledger.models import LedgerEventCreate
 from app.ledger.store import LedgerStore
+from app.otari.guardrails import GuardrailEvent
 from app.policy.service import PolicyService, PolicyServiceError
 from app.txn.models import Transaction
 from app.txn.store import TransactionStore
@@ -54,6 +55,12 @@ def _workflow_projection(
         for event in events
         if event.type in {"RUN_ACTIVITY", "READ_TOOL_CALL"}
     ]
+    guardrail_events = [
+        event.model_dump(mode="json")
+        for event in events
+        if event.type.startswith("GUARDRAIL_")
+    ]
+    latest_guardrail = guardrail_events[-1] if guardrail_events else None
     proposal = transactions[0] if transactions else None
     decisions = sorted(
         {item.authorization_decision for item in transactions if item.authorization_decision}
@@ -118,6 +125,35 @@ def _workflow_projection(
                 "status": "COMPLETED" if terminal else "IN_PROGRESS",
                 "summary": f"{len(planner_events)} persisted planner activities.",
                 "details": {"events": planner_events},
+            },
+            {
+                "id": "guardrail",
+                "title": "Otari prompt-injection guardrail",
+                "status": (
+                    latest_guardrail["status"]
+                    if latest_guardrail
+                    else ("NOT_STARTED" if not terminal else "UNKNOWN")
+                ),
+                "summary": (
+                    "Planner inference was blocked before any proposal could be accepted."
+                    if latest_guardrail
+                    and latest_guardrail["status"] == "BLOCKED"
+                    else (
+                        (
+                            "Mandatory guardrail enforcement was unavailable; "
+                            "planner inference stopped."
+                        )
+                        if latest_guardrail
+                        and latest_guardrail["status"] == "UNAVAILABLE"
+                        else (
+                            "Otari allowed planner inference to continue."
+                            if latest_guardrail
+                            and latest_guardrail["status"] == "PASSED"
+                            else "No guardrail result was recorded."
+                        )
+                    )
+                ),
+                "details": {"events": guardrail_events, "latest": latest_guardrail},
             },
             {
                 "id": "proposal",
@@ -301,6 +337,27 @@ async def _execute_run(
             # Activity is useful observability, but must not alter run safety.
             pass
 
+    def guardrail_event(event: Any) -> None:
+        try:
+            if not isinstance(event, GuardrailEvent):
+                return
+            event_type = {
+                "PASSED": "GUARDRAIL_EVALUATED",
+                "BLOCKED": "GUARDRAIL_BLOCKED",
+                "UNAVAILABLE": "GUARDRAIL_ERROR",
+                "UNKNOWN": "GUARDRAIL_ERROR",
+            }[event.status.value]
+            app.state.ledger_store.append_event(
+                LedgerEventCreate(
+                    run_id=run_id,
+                    type=event_type,
+                    payload=event.ledger_payload(),
+                )
+            )
+        except Exception:
+            # A telemetry failure must not turn a safe planner result into an unsafe one.
+            pass
+
     try:
         orchestrator = AgentOrchestrator(
             client=app.state.planner_client,
@@ -308,6 +365,7 @@ async def _execute_run(
             proposal_evaluator=app.state.proposal_evaluator,
             model=planner_model,
             progress_callback=progress,
+            guardrail_callback=guardrail_event,
         )
         result = await orchestrator.run(run_id=run_id, user_request=user_request)
         _set_run_result(db_path, run_id, result=result)

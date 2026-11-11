@@ -120,10 +120,11 @@ button { border: 0; border-radius: 7px; padding: 12px 17px; font-weight: 700; fo
 .checkpoint .stage-marker { border-color: #a477dc; color: #d3b6ff; }
 .checkpoint .stage-body::after { content: ''; position: absolute; inset: -1px; border: 1px solid #a477dc; border-radius: inherit; opacity: .35; animation: checkpoint-pulse 2.4s ease-in-out infinite; pointer-events: none; }
 .workflow-status { display: inline-block; flex: 0 0 auto; border: 1px solid #29415b; border-radius: 999px; padding: 6px 9px; color: #91a7bc; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
-.status-completed, .status-allow, .status-succeeded, .status-verified { color: #67dfb2; border-color: #27644f; background: #12392e; }
+.status-completed, .status-allow, .status-succeeded, .status-verified, .status-passed { color: #67dfb2; border-color: #27644f; background: #12392e; }
 .status-in_progress, .status-executing { color: #73d8f0; border-color: #28667a; background: #103341; }
 .status-waiting_for_approval, .status-require_approval, .status-indeterminate { color: #f4cb69; border-color: #7a6130; background: #3d3219; }
-.status-failed, .status-deny, .status-blocked, .status-not_verified { color: #ff9aa6; border-color: #743042; background: #3a1822; }
+.status-failed, .status-deny, .status-blocked, .status-unavailable { color: #ff9aa6; border-color: #743042; background: #3a1822; }
+.status-unknown { color: #f4cb69; border-color: #7a6130; background: #3d3219; }
 .status-not_started, .status-pending { color: #8da6bf; }
 .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 20px; }
 .detail-grid > div { min-width: 0; padding: 12px; border: 1px solid #1b3045; border-radius: 7px; background: #081423; }
