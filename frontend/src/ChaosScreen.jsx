@@ -49,6 +49,19 @@ function RecoverySummary({ run }) {
   return <div className="recovery-explanation"><strong>Response lost after the external operation.</strong><span>TrustRail did not retry the write. It queried GitHub using a read-only probe and recovered the actual outcome.</span><small>Write was attempted once. Its response was lost. TrustRail did not retry. A read-only probe verified the external result.</small></div>
 }
 
+function ComparisonPanel({ safeRun, naiveRun }) {
+  if (!safeRun && !naiveRun) return null
+  const rows = [
+    ['Execution mode', (item) => item?.observability?.execution_mode || 'Awaiting approval'],
+    ['State path', (item) => item?.observability?.state_path?.join(' → ') || 'Authorization pending'],
+    ['Write attempts', (item) => item?.observability?.write_attempts ?? 0],
+    ['Read-only probes', (item) => item?.observability?.read_only_probes ?? 0],
+    ['Final status', (item) => item?.transaction?.status || '—'],
+    ['Markers', (item) => item?.issue?.marker_count ?? 0],
+  ]
+  return <section className="panel chaos-comparison"><div className="panel-heading"><div><p className="eyebrow">EXECUTION COMPARISON</p><h2>Same fault, different retry policy</h2></div><span className="muted">Backend evidence</span></div><div className="comparison-grid"><div className="comparison-labels"><span>Metric</span>{rows.map(([label]) => <span key={label}>{label}</span>)}</div>{[['safe', safeRun, 'TrustRail safe execution'], ['naive', naiveRun, 'Naive blind retry']].map(([key, item, label]) => <article className={`comparison-column comparison-${key}`} key={key}><header><strong>{label}</strong><b>{item ? item.transaction?.status : 'WAITING'}</b></header>{rows.map(([metric, value]) => <div className="comparison-value" key={metric}><span>{metric}</span><b>{value(item)}</b></div>)}</article>)}</div></section>
+}
+
 function ResultCard({ title, run, onApprove, busy }) {
   const transaction = run?.transaction
   if (!run) return <article className="chaos-result muted"><span>{title}</span><strong>Waiting for demo</strong></article>
@@ -79,8 +92,8 @@ export default function ChaosScreen() {
   useEffect(() => {
     if (!poll.data) return
     const target = run?.run_id === poll.data.run_id ? 'safe' : naiveRun?.run_id === poll.data.run_id ? 'naive' : null
-    if (target === 'safe') setRun(poll.data)
-    if (target === 'naive') setNaiveRun(poll.data)
+    if (target === 'safe') setRun((current) => ({ ...poll.data, executorMode: current?.executorMode || 'secure' }))
+    if (target === 'naive') setNaiveRun((current) => ({ ...poll.data, executorMode: current?.executorMode || 'naive' }))
 
     const transaction = poll.data.transaction
     if (transaction?.status !== 'INDETERMINATE' || reconciledTransactions.current.has(transaction.id)) return
@@ -89,8 +102,8 @@ export default function ChaosScreen() {
     chaosApi.reconcile(transaction.id)
       .then(() => chaosApi.getRun(poll.data.run_id))
       .then((result) => {
-        if (target === 'safe') setRun(result)
-        if (target === 'naive') setNaiveRun(result)
+        if (target === 'safe') setRun((current) => ({ ...result, executorMode: current?.executorMode || 'secure' }))
+        if (target === 'naive') setNaiveRun((current) => ({ ...result, executorMode: current?.executorMode || 'naive' }))
         setIssueState(result.issue)
       })
       .catch(setError)
@@ -111,7 +124,8 @@ export default function ChaosScreen() {
       // The MCP fault controller is consume-once; arm it for every demo run.
       await chaosApi.fault(fault)
       const result = await chaosApi.run({ issue_number: Number(issueNumber), note, executor })
-      if (executor === 'naive') setNaiveRun(result); else setRun(result)
+      const trackedResult = { ...result, executorMode: executor }
+      if (executor === 'naive') setNaiveRun(trackedResult); else setRun(trackedResult)
       setIssueState(result.issue)
     } catch (caught) { setError(caught) } finally { setBusy(false) }
   }
@@ -120,10 +134,11 @@ export default function ChaosScreen() {
     setBusy(true); setError(null)
     try {
       await chaosApi.approve(currentRun.transaction.id)
-      const result = await chaosApi.retry(currentRun.transaction.id)
-      if (currentRun.run_id === run?.run_id) setRun((current) => ({ ...current, transaction: result, issue: current.issue }))
-      else setNaiveRun((current) => ({ ...current, transaction: result, issue: current.issue }))
-      setIssueState(await chaosApi.issueState(Number(issueNumber)))
+      await chaosApi.retry(currentRun.transaction.id, currentRun.executorMode || 'secure')
+      const result = await chaosApi.getRun(currentRun.run_id)
+      if (currentRun.run_id === run?.run_id) setRun({ ...result, executorMode: currentRun.executorMode || 'secure' })
+      else setNaiveRun({ ...result, executorMode: currentRun.executorMode || 'naive' })
+      setIssueState(result.issue)
     } catch (caught) { setError(caught) } finally { setBusy(false) }
   }
   async function resetDemo() {
@@ -139,5 +154,6 @@ export default function ChaosScreen() {
       <article className="panel chaos-config"><div className="panel-heading"><div><p className="eyebrow">FAULT INJECTION</p><h2>Choose the failure</h2></div><span className="state-badge">{fault === 'none' ? 'NO FAULT' : 'INJECTED'}</span></div><select value={fault} onChange={configureFault}>{(status?.fault_modes || Object.keys(FAULT_INFO).map((value) => ({ value }))).map((mode) => <option key={mode.value} value={mode.value}>{FAULT_INFO[mode.value]?.[0] || mode.label}</option>)}</select><p className="muted">{FAULT_INFO[fault]?.[1]}</p><small className="config-confirmation">Backend mode: <code>{status?.fault_mode || fault}</code></small></article></section>
     <section className="panel chaos-controls"><div className="panel-heading"><div><p className="eyebrow">EXECUTOR MODE</p><h2>Who controls the write?</h2></div><span className={`mode-flag ${executor === 'naive' ? 'unsafe' : 'safe'}`}>{executor === 'naive' ? 'UNSAFE DEMO' : 'SAFE PATH'}</span></div><div className="executor-toggle"><button className={executor === 'secure' ? 'selected' : ''} onClick={() => setExecutor('secure')}><b>SAFE EXECUTOR</b><span>Single controlled dispatch, reconciliation, no blind retry.</span></button><button className={executor === 'naive' ? 'selected unsafe' : ''} onClick={() => setExecutor('naive')}><b>NAIVE EXECUTOR</b><span>Demonstration only. May create duplicate comments.</span></button></div>{executor === 'naive' && <div className="alert warning-alert">Naive mode is explicitly opt-in and remains restricted to the configured demo environment.</div>}<textarea className="chaos-note" value={note} onChange={(event) => setNote(event.target.value)} maxLength={5000} /><div className="chaos-actions"><button className="primary chaos-run" onClick={executeDemo} disabled={busy || !issueNumber}>{busy ? 'Running controlled demo…' : 'Run demo →'}</button><button className="quiet" onClick={resetDemo} disabled={busy || !issueNumber}>Reset sandbox</button></div></section>
     <section className="panel"><div className="panel-heading"><div><p className="eyebrow">OBSERVED OUTCOME</p><h2>Naive versus TrustRail</h2></div><span className="muted">Actual GitHub evidence</span></div><div className="chaos-results"><ResultCard title="TrustRail safe execution" run={run} onApprove={() => approveAndExecute(run)} busy={busy} /><ResultCard title="Naive demonstration" run={naiveRun} onApprove={() => approveAndExecute(naiveRun)} busy={busy} /></div></section>
+    <ComparisonPanel safeRun={run} naiveRun={naiveRun} />
   </main>
 }
