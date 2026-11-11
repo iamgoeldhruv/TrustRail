@@ -960,6 +960,53 @@ class TransactionStore:
 
         return updated
 
+    def has_not_executed_retry_preparation(
+        self,
+        transaction_id: UUID | str,
+    ) -> bool:
+        """Return whether the current approval belongs to a fresh retry."""
+        transaction_id = str(transaction_id)
+
+        with get_connection(self.db_path) as connection:
+            transaction = connection.execute(
+                "SELECT approval_id FROM transactions WHERE id = ?",
+                (transaction_id,),
+            ).fetchone()
+            if transaction is None or transaction["approval_id"] is None:
+                return False
+
+            events = connection.execute(
+                """
+                SELECT type, payload_json
+                FROM events
+                WHERE txn_id = ?
+                ORDER BY seq ASC
+                """,
+                (transaction_id,),
+            ).fetchall()
+
+        latest_retry_seq: int | None = None
+        approval_id = transaction["approval_id"]
+        for event in events:
+            payload = json.loads(event["payload_json"])
+            if (
+                event["type"] == "TRANSACTION_RETRY_PREPARED"
+                and payload.get("reason")
+                == "not_executed_fresh_approval_required"
+            ):
+                latest_retry_seq = event["seq"]
+            elif (
+                latest_retry_seq is not None
+                and event["type"] == "APPROVAL_DECISION_RECORDED"
+                and payload.get("approval_id") == approval_id
+                and payload.get("decision") == "APPROVE"
+                and payload.get("from_status") == "PENDING_APPROVAL"
+                and payload.get("to_status") == "APPROVED"
+            ):
+                return True
+
+        return False
+
     def invalidate_approval(
         self,
         transaction_id: UUID | str,
