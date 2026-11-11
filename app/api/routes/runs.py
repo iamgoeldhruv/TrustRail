@@ -41,6 +41,164 @@ def _transaction_payload(transaction: Transaction) -> dict[str, Any]:
     return transaction.model_dump(mode="json")
 
 
+def _workflow_projection(
+    *,
+    run: dict[str, Any],
+    transactions: list[Transaction],
+    events: list[Any],
+    ledger: LedgerStore,
+) -> dict[str, Any]:
+    """Build a read-only view from persisted run, transaction, and ledger state."""
+    planner_events = [
+        event.model_dump(mode="json")
+        for event in events
+        if event.type in {"RUN_ACTIVITY", "READ_TOOL_CALL"}
+    ]
+    proposal = transactions[0] if transactions else None
+    decisions = sorted(
+        {item.authorization_decision for item in transactions if item.authorization_decision}
+    )
+    decision = decisions[0] if len(decisions) == 1 else (
+        "MULTIPLE" if len(decisions) > 1 else None
+    )
+    terminal = run["status"] in {"COMPLETED", "FAILED"}
+    proposal_status = (
+        "COMPLETED" if proposal else ("IN_PROGRESS" if not terminal else "NOT_STARTED")
+    )
+    validation_status = (
+        "COMPLETED"
+        if transactions and all(item.evaluated_at for item in transactions)
+        else ("IN_PROGRESS" if transactions else "NOT_STARTED")
+    )
+    approval_status = "NOT_STARTED"
+    if any(item.status.value == "PENDING_APPROVAL" for item in transactions):
+        approval_status = "WAITING_FOR_APPROVAL"
+    elif proposal:
+        if proposal.status.value in {"APPROVED", "REJECTED", "APPROVAL_INVALIDATED"}:
+            approval_status = "COMPLETED" if proposal.status.value == "APPROVED" else "BLOCKED"
+        elif decision == "ALLOW":
+            approval_status = "NOT_STARTED"
+    execution_status = "NOT_STARTED"
+    transaction_statuses = {item.status.value for item in transactions}
+    if transaction_statuses & {"DISPATCHING", "PRECHECK"}:
+        execution_status = "IN_PROGRESS"
+    elif "INDETERMINATE" in transaction_statuses:
+        execution_status = "INDETERMINATE"
+    elif transaction_statuses & {"FAILED", "FAILED_SAFE"}:
+        execution_status = "FAILED"
+    elif transaction_statuses & {"SUCCEEDED", "RECONCILING"}:
+        execution_status = "COMPLETED"
+    elif transaction_statuses & {"DENIED", "REJECTED", "APPROVAL_INVALIDATED"}:
+        execution_status = "BLOCKED"
+
+    reconciliation_events = [
+        event.model_dump(mode="json")
+        for event in events
+        if event.type.startswith("RECONCILIATION_")
+    ]
+    verification = ledger.verify_chain(run_id=run["run_id"])
+    return {
+        "stages": [
+            {
+                "id": "request",
+                "title": "Request received",
+                "status": "COMPLETED",
+                "summary": "TrustRail initialized this run.",
+                "details": {
+                    "run_id": run["run_id"],
+                    "user_request": run["user_request"],
+                    "planner_model": run["planner_model"],
+                    "created_at": run["created_at"],
+                    "run_status": run["status"],
+                },
+            },
+            {
+                "id": "planning",
+                "title": "Agent planning",
+                "status": "COMPLETED" if terminal else "IN_PROGRESS",
+                "summary": f"{len(planner_events)} persisted planner activities.",
+                "details": {"events": planner_events},
+            },
+            {
+                "id": "proposal",
+                "title": "Action proposed",
+                "status": proposal_status,
+                "summary": (
+                    f"{len(transactions)} proposal(s) persisted."
+                    if transactions else "The planner has not persisted a proposal."
+                ),
+                "details": {"proposals": [_transaction_payload(item) for item in transactions]},
+            },
+            {
+                "id": "validation",
+                "title": "TrustRail independent validation",
+                "status": validation_status,
+                "summary": decision or "Awaiting an evaluated proposal.",
+                "details": {
+                    "decision": decision,
+                    "policy_id": proposal.policy_id if proposal else run["policy_id"],
+                    "policy_version": proposal.policy_version if proposal else None,
+                    "evaluations": [
+                        {
+                            "transaction_id": item.id,
+                            "decision": item.authorization_decision,
+                            "facts": item.facts,
+                            "reasons": item.authorization_reasons or [],
+                            "evaluated_at": item.evaluated_at,
+                        }
+                        for item in transactions
+                    ],
+                    "evaluated_at": proposal.evaluated_at if proposal else None,
+                },
+            },
+            {
+                "id": "approval",
+                "title": "Human approval",
+                "status": approval_status,
+                "summary": (
+                    "Approval is required before execution."
+                    if approval_status == "WAITING_FOR_APPROVAL"
+                    else "No pending human approval."
+                ),
+                "details": {
+                    "approval_id": proposal.approval_id if proposal else None,
+                    "invalidation_reason": (
+                        proposal.approval_invalidation_reason if proposal else None
+                    ),
+                },
+            },
+            {
+                "id": "execution",
+                "title": "Controlled execution",
+                "status": execution_status,
+                "summary": proposal.status.value if proposal else "No authorized transaction.",
+                "details": {
+                    "transaction_id": proposal.id if proposal else None,
+                    "otari_request_ids": proposal.otari_request_ids if proposal else [],
+                    "attempt": proposal.attempt if proposal else 0,
+                },
+            },
+            {
+                "id": "verification",
+                "title": "Outcome verification & audit",
+                "status": (
+                    "COMPLETED" if reconciliation_events or terminal else "NOT_STARTED"
+                ),
+                "summary": (
+                    f"{len(reconciliation_events)} reconciliation event(s) persisted."
+                    if reconciliation_events else "No reconciliation result has been persisted."
+                ),
+                "details": {
+                    "reconciliation": reconciliation_events,
+                    "ledger_verification": verification.model_dump(mode="json"),
+                    "ledger_event_count": len(events),
+                },
+            },
+        ],
+        "ledger_verification": verification.model_dump(mode="json"),
+    }
+
+
 def _run_row(run_id: str, request: Request) -> dict[str, Any]:
     store: TransactionStore = request.app.state.transaction_store
     with get_connection(store.db_path) as connection:
@@ -58,7 +216,7 @@ def _run_row(run_id: str, request: Request) -> dict[str, Any]:
 
     transactions = store.list_transactions(run_id=run_id)
     events = request.app.state.ledger_store.get_events(run_id=run_id)
-    return {
+    result = {
         "id": row["id"],
         "run_id": row["id"],
         "policy_id": row["policy_id"],
@@ -79,6 +237,13 @@ def _run_row(run_id: str, request: Request) -> dict[str, Any]:
         "proposal_count": len(transactions),
         "events": [event.model_dump(mode="json") for event in events],
     }
+    result["workflow"] = _workflow_projection(
+        run=result,
+        transactions=transactions,
+        events=events,
+        ledger=request.app.state.ledger_store,
+    )
+    return result
 
 
 def _set_run_result(

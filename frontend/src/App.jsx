@@ -3,6 +3,7 @@ import { ApiError } from './lib/api/client'
 import { policyApi } from './lib/api/policies'
 import RunScreen from './RunScreen'
 import LedgerScreen from './LedgerScreen'
+import ChaosScreen from './ChaosScreen'
 import './App.css'
 
 const EXAMPLE = 'Allow the agent to close stale P2 and P3 issues in the configured repository when they have been inactive for at least 30 days. Require human approval before closing P1 issues. Never close issues with the security label.'
@@ -95,11 +96,12 @@ function App() {
           <button className={screen === 'run' ? 'nav-active' : ''} onClick={() => setScreen('run')}>Run</button>
           <button className={screen === 'ledger' ? 'nav-active' : ''} onClick={() => setScreen('ledger')}>Ledger</button>
           <button className={screen === 'policy' ? 'nav-active' : ''} onClick={() => setScreen('policy')}>Policies</button>
+          <button className={screen === 'chaos' ? 'nav-active' : ''} onClick={() => setScreen('chaos')}>Chaos Lab</button>
         </nav>
         <div className="status-pill"><span className="status-dot" /> Authorization console</div>
       </header>
 
-      {screen === 'run' ? <RunScreen /> : screen === 'ledger' ? <LedgerScreen /> : <>
+      {screen === 'run' ? <RunScreen /> : screen === 'ledger' ? <LedgerScreen /> : screen === 'chaos' ? <ChaosScreen /> : <>
       <section className="hero-copy">
         <p className="eyebrow">POLICY MANAGEMENT / CONTROL PLANE</p>
         <h1>Authorise with intention.</h1>
