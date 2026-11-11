@@ -17,6 +17,7 @@ from app.api.routes.reconciliation import router as reconciliation_router
 from app.api.routes.retry import router as retry_router
 from app.api.routes.runs import router as runs_router
 from app.api.routes.ledger import router as ledger_router
+from app.api.routes.chaos import router as chaos_router
 from app.approvals.service import ApprovalService
 from app.approvals.store import ApprovalStore
 from app.core.config import settings
@@ -178,6 +179,7 @@ app.include_router(policy_management_router)
 app.include_router(retry_router)
 app.include_router(runs_router)
 app.include_router(ledger_router)
+app.include_router(chaos_router)
 
 
 @app.get("/health")
