@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ApiError } from './lib/api/client'
 import { policyApi } from './lib/api/policies'
 import RunScreen from './RunScreen'
@@ -30,10 +30,15 @@ function App() {
   const [activationError, setActivationError] = useState(null)
   const [activating, setActivating] = useState(false)
   const [active, setActive] = useState(null)
-  const [screen, setScreen] = useState('run')
+  const [screen, setScreen] = useState('policy')
+  const [ledgerReady, setLedgerReady] = useState(false)
 
   useEffect(() => {
-    policyApi.active().then(setActive).catch(() => {})
+    policyApi.active().then((result) => {
+      setActive(result)
+    }).catch(() => {
+      setActive(null)
+    })
   }, [])
 
   async function compile() {
@@ -80,6 +85,7 @@ function App() {
       const result = await policyApi.activate(compiled.policy, description)
       setActivation(result)
       setActive(result)
+      setScreen('run')
     } catch (error) {
       setActivationError(error)
     } finally {
@@ -88,22 +94,33 @@ function App() {
   }
 
   const readyToReview = Boolean(compiled?.policy)
+  const runReady = Boolean(active?.policy)
+
+  const handleRunState = useCallback((run) => {
+    if (!run) return
+    const proposals = run.proposals || []
+    const hasPendingApproval = proposals.some((proposal) => proposal.status === 'PENDING_APPROVAL')
+    const allTerminal = proposals.length > 0 && proposals.every((proposal) => (
+      ['SUCCEEDED', 'FAILED', 'FAILED_SAFE', 'REJECTED', 'DENIED', 'APPROVAL_INVALIDATED'].includes(proposal.status)
+    ))
+    setLedgerReady(run.status === 'COMPLETED' && allTerminal && !hasPendingApproval)
+  }, [])
 
   return (
     <main className="policy-shell">
       <header className="topbar">
         <div className="brand"><span className="brand-mark">TR</span><span>TrustRail</span></div>
         <nav className="screen-nav" aria-label="Primary">
-          <button className={screen === 'run' ? 'nav-active' : ''} onClick={() => setScreen('run')}>Run</button>
-          <button className={screen === 'ledger' ? 'nav-active' : ''} onClick={() => setScreen('ledger')}>Ledger</button>
           <button className={screen === 'policy' ? 'nav-active' : ''} onClick={() => setScreen('policy')}>Policies</button>
+          {runReady && <button className={screen === 'run' ? 'nav-active' : ''} onClick={() => setScreen('run')}>Run</button>}
+          {ledgerReady && <button className={screen === 'ledger' ? 'nav-active' : ''} onClick={() => setScreen('ledger')}>Ledger</button>}
           <button className={screen === 'chaos' ? 'nav-active' : ''} onClick={() => setScreen('chaos')}>Chaos Lab</button>
           <button className={screen === 'usage' ? 'nav-active' : ''} onClick={() => setScreen('usage')}>Usage &amp; Budgets</button>
         </nav>
         <div className="status-pill"><span className="status-dot" /> Authorization console</div>
       </header>
 
-      {screen === 'run' ? <RunScreen onViewUsage={() => setScreen('usage')} /> : screen === 'ledger' ? <LedgerScreen /> : screen === 'chaos' ? <ChaosScreen /> : screen === 'usage' ? <UsageScreen /> : <>
+      {screen === 'run' && runReady ? <RunScreen onViewUsage={() => setScreen('usage')} onRunStateChange={handleRunState} onViewLedger={() => setScreen('ledger')} /> : screen === 'ledger' && ledgerReady ? <LedgerScreen /> : screen === 'chaos' ? <ChaosScreen /> : screen === 'usage' ? <UsageScreen /> : <>
       <section className="hero-copy">
         <p className="eyebrow">POLICY MANAGEMENT / CONTROL PLANE</p>
         <h1>Authorise with intention.</h1>

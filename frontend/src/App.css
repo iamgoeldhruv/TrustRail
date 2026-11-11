@@ -7,6 +7,8 @@
 .screen-nav { display: flex; gap: 5px; margin-left: auto; margin-right: 24px; }
 .screen-nav button { color: #7890a8; background: transparent; padding: 8px 12px; font-size: 13px; }
 .screen-nav button:hover, .screen-nav .nav-active { color: #e8f5ff; background: #13283d; }
+.flow-next-step { margin-top: 22px; border-color: #27644f; }
+.flow-next-step h2 { margin-bottom: 8px; }
 .hero-copy { max-width: 880px; padding: clamp(72px, 9vw, 126px) 0 48px; }
 .eyebrow { color: #35c9e8; font-size: 12px; font-weight: 700; letter-spacing: .16em; margin: 0 0 12px; }
 h1, h2, p { margin-top: 0; } h1 { font-size: clamp(42px, 6vw, 78px); letter-spacing: -.055em; line-height: .98; margin-bottom: 22px; color: #f0f6ff; } h2 { color: #edf5ff; font-size: 21px; margin-bottom: 9px; } .hero-copy > p:last-child { color: #8ea2b8; font-size: 18px; line-height: 1.6; max-width: 700px; }

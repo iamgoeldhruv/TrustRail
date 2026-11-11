@@ -103,7 +103,7 @@ function Workflow({ stages, proposals, onDecision, busy, onChangePrompt }) {
   </section>
 }
 
-export default function RunScreen({ onViewUsage }) {
+export default function RunScreen({ onViewUsage, onRunStateChange, onViewLedger }) {
   const [requestText, setRequestText] = useState('')
   const [run, setRun] = useState(null)
   const [startError, setStartError] = useState(null)
@@ -114,21 +114,32 @@ export default function RunScreen({ onViewUsage }) {
   const active = Boolean(run && !TERMINAL_RUN_STATES.has(run.status))
   const poll = usePolling(({ signal }) => runApi.get(run.id, { signal }), { enabled: active, intervalMs: 1000, stopWhen: (result) => TERMINAL_RUN_STATES.has(result.status) })
 
-  useEffect(() => { if (poll.data) setRun(poll.data) }, [poll.data])
+  useEffect(() => {
+    if (poll.data) {
+      setRun(poll.data)
+      onRunStateChange?.(poll.data)
+    }
+  }, [poll.data, onRunStateChange])
   const pendingCount = useMemo(() => (run?.proposals || []).filter((item) => item.status === APPROVAL_STATE).length, [run])
 
   async function startRun(event) {
     event.preventDefault()
     if (!requestText.trim() || starting) return
     setStarting(true); setStartError(null); setDecisionError(null)
-    try { setRun(await runApi.start(requestText.trim())) } catch (error) { setStartError(error) } finally { setStarting(false) }
+    try {
+      const result = await runApi.start(requestText.trim())
+      setRun(result)
+      onRunStateChange?.(result)
+    } catch (error) { setStartError(error) } finally { setStarting(false) }
   }
 
   async function decide(proposal, action) {
     setBusyProposal(proposal.id); setDecisionError(null)
     try {
       if (action === 'approve') { await runApi.approve(proposal.id, 'console-operator'); await runApi.execute(proposal.id) } else await runApi.reject(proposal.id, 'console-operator')
-      setRun(await runApi.get(run.id))
+      const result = await runApi.get(run.id)
+      setRun(result)
+      onRunStateChange?.(result)
       poll.refresh()
     } catch (error) { setDecisionError(error); try { setRun(await runApi.get(run.id)) } catch { /* preserve the backend error */ } } finally { setBusyProposal(null) }
   }
@@ -138,10 +149,12 @@ export default function RunScreen({ onViewUsage }) {
     requestInputRef.current?.focus()
   }
 
+  const canViewLedger = run?.status === 'COMPLETED' && run.proposals?.length > 0 && run.proposals.every((proposal) => ['SUCCEEDED', 'FAILED', 'FAILED_SAFE', 'REJECTED', 'DENIED', 'APPROVAL_INVALIDATED'].includes(proposal.status)) && !run.proposals.some((proposal) => proposal.status === APPROVAL_STATE)
+
   return <main className="run-shell">
     <section className="run-hero"><div><p className="eyebrow">AGENT OPERATIONS / AUTHORIZATION WORKFLOW</p><h1>Run with control.</h1><p> The planner proposes. TrustRail validates. Humans approve when required. The controlled executor records the outcome.</p></div><div className="security-note"><span className="status-dot" /> Backend authorization enforced</div></section>
     <form className="panel run-composer" onSubmit={startRun}><div className="panel-heading"><div><p className="eyebrow">REQUEST COMPOSER</p><h2>What should the agent investigate?</h2><p className="muted">This request becomes the immutable run context. The planner can read and propose; it cannot authorize or execute writes.</p></div><span className="state-badge">READ + PROPOSE</span></div><PlannerBudgetIndicator onViewUsage={onViewUsage} /><textarea ref={requestInputRef} value={requestText} onChange={(event) => setRequestText(event.target.value)} placeholder={EXAMPLE} maxLength={10000} disabled={starting} /><div className="run-form-footer"><div className="model-visibility"><span>Planner model</span><strong>trustrail-planner</strong><small>Configured routing policy</small></div><button className="primary run-button" disabled={starting || !requestText.trim()}>{starting ? 'Starting run…' : 'Start run →'}</button></div><ErrorMessage error={startError} /></form>
     {!run && <section className="empty-run panel"><span className="empty-icon">01</span><h2>No active run</h2><p className="muted">Start with a natural-language request to see the complete authorization workflow.</p></section>}
-    {run && <><section className="run-summary"><div><p className="eyebrow">RUN {run.run_id}</p><h2>{run.status === 'RUNNING' ? 'Planner is working…' : `Run ${run.status.toLowerCase()}`}</h2><p className="muted">{run.user_request}</p></div><div className="run-stat"><span>MODEL</span><b>{run.planner_model}</b></div><div className="run-stat"><span>PROPOSALS</span><b>{run.proposal_count}</b></div><div className="run-stat"><span>PENDING APPROVAL</span><b>{pendingCount}</b></div></section><div className="run-last-updated">{poll.isPolling ? 'Refreshing…' : poll.lastUpdated ? `Last updated ${poll.lastUpdated.toLocaleTimeString()}` : 'Read-only workflow projection'}</div>{decisionError && <ErrorMessage error={decisionError} />}{poll.error && <><ErrorMessage error={poll.error} /><button className="quiet" onClick={poll.refresh}>Retry read-only refresh</button></>}<Workflow stages={run.workflow?.stages || []} proposals={run.proposals} onDecision={decide} busy={busyProposal} onChangePrompt={changePrompt} /></>}
+    {run && <><section className="run-summary"><div><p className="eyebrow">RUN {run.run_id}</p><h2>{run.status === 'RUNNING' ? 'Planner is working…' : `Run ${run.status.toLowerCase()}`}</h2><p className="muted">{run.user_request}</p></div><div className="run-stat"><span>MODEL</span><b>{run.planner_model}</b></div><div className="run-stat"><span>PROPOSALS</span><b>{run.proposal_count}</b></div><div className="run-stat"><span>PENDING APPROVAL</span><b>{pendingCount}</b></div></section><div className="run-last-updated">{poll.isPolling ? 'Refreshing…' : poll.lastUpdated ? `Last updated ${poll.lastUpdated.toLocaleTimeString()}` : 'Read-only workflow projection'}</div>{decisionError && <ErrorMessage error={decisionError} />}{poll.error && <><ErrorMessage error={poll.error} /><button className="quiet" onClick={poll.refresh}>Retry read-only refresh</button></>}<Workflow stages={run.workflow?.stages || []} proposals={run.proposals} onDecision={decide} busy={busyProposal} onChangePrompt={changePrompt} />{canViewLedger && <section className="panel flow-next-step"><p className="eyebrow">WORKFLOW COMPLETE</p><h2>Review the audit ledger</h2><p className="muted">The run has completed and no approvals are pending. Open the append-only ledger to inspect the recorded evidence.</p><button className="primary" onClick={onViewLedger}>Go to Ledger →</button></section>}</>}
   </main>
 }

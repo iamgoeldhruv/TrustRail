@@ -80,6 +80,7 @@ async def _set_remote_fault(mode: FaultMode, request: Request) -> dict[str, Any]
     except httpx.HTTPStatusError as exc:
         raise HTTPException(status_code=502, detail="MCP fault configuration was rejected") from exc
     except httpx.RequestError as exc:
+        print(exc)
         raise HTTPException(status_code=502, detail="MCP fault server is unavailable") from exc
     except ValueError as exc:
         raise HTTPException(
