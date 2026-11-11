@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError } from './lib/api/client'
 import { runApi } from './lib/api/runs'
 import { usePolling } from './hooks/usePolling'
@@ -64,11 +64,17 @@ function StageDetails({ stage }) {
   return <div className="detail-grid">{Object.entries(details).filter(([, value]) => value !== null && value !== undefined && value !== '').map(([key, value]) => <div key={key}><span>{key.replaceAll('_', ' ')}</span><strong>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</strong></div>)}</div>
 }
 
-function Workflow({ stages, proposals, onDecision, busy }) {
+function Workflow({ stages, proposals, onDecision, busy, onChangePrompt }) {
+  const guardrailIndex = stages.findIndex((stage) => stage.id === 'guardrail')
+  const guardrail = guardrailIndex >= 0 ? stages[guardrailIndex] : null
+  const guardrailStatus = guardrail?.details?.latest?.status || guardrail?.status
+  const halted = guardrailStatus === 'BLOCKED' || guardrailStatus === 'UNAVAILABLE'
+  const visibleStages = halted ? stages.slice(0, guardrailIndex + 1) : stages
+  const blocked = guardrailStatus === 'BLOCKED'
   return <section className="workflow-pipeline" aria-label="TrustRail execution workflow">
     <div className="workflow-intro"><div><p className="eyebrow">TRUSTRAIL EXECUTION PIPELINE</p><h2>From intent to verified outcome</h2></div><span className="pipeline-caption">Planner proposes <b>·</b> TrustRail decides <b>·</b> Ledger remembers</span></div>
     <div className="workflow-track">
-      {stages.map((stage, index) => <article className={`workflow-stage stage-${stage.id} ${stage.id === 'validation' ? 'checkpoint' : ''}`} style={{ '--stage-delay': `${index * 140}ms` }} key={stage.id}>
+      {visibleStages.map((stage, index) => <article className={`workflow-stage stage-${stage.id} ${stage.id === 'validation' ? 'checkpoint' : ''}`} style={{ '--stage-delay': `${index * 140}ms` }} key={stage.id}>
         <div className="stage-connector" aria-hidden="true" />
         <div className="stage-body">
           <div className="stage-marker">{String(index + 1).padStart(2, '0')}</div>
@@ -79,6 +85,14 @@ function Workflow({ stages, proposals, onDecision, busy }) {
         </div>
       </article>)}
     </div>
+    {halted && <div className={`workflow-halt ${blocked ? 'workflow-halt-blocked' : ''}`} role="alert">
+      <div>
+        <p className="eyebrow">{blocked ? 'WORKFLOW STOPPED' : 'WORKFLOW PAUSED'}</p>
+        <h3>{blocked ? 'Prompt injection detected. Change your prompt to continue.' : 'Mandatory guardrail enforcement is unavailable.'}</h3>
+        <p>{blocked ? 'Otari blocked this request before TrustRail could plan, propose, validate, or execute any action. No further workflow stages will run.' : 'TrustRail will not continue planning until the mandatory Otari guardrail can evaluate the request.'}</p>
+      </div>
+      {blocked && <button className="primary" onClick={onChangePrompt}>Change prompt</button>}
+    </div>}
   </section>
 }
 
@@ -89,6 +103,7 @@ export default function RunScreen({ onViewUsage }) {
   const [starting, setStarting] = useState(false)
   const [decisionError, setDecisionError] = useState(null)
   const [busyProposal, setBusyProposal] = useState(null)
+  const requestInputRef = useRef(null)
   const active = Boolean(run && !TERMINAL_RUN_STATES.has(run.status))
   const poll = usePolling(({ signal }) => runApi.get(run.id, { signal }), { enabled: active, intervalMs: 1000, stopWhen: (result) => TERMINAL_RUN_STATES.has(result.status) })
 
@@ -111,10 +126,15 @@ export default function RunScreen({ onViewUsage }) {
     } catch (error) { setDecisionError(error); try { setRun(await runApi.get(run.id)) } catch { /* preserve the backend error */ } } finally { setBusyProposal(null) }
   }
 
+  function changePrompt() {
+    setRequestText('')
+    requestInputRef.current?.focus()
+  }
+
   return <main className="run-shell">
     <section className="run-hero"><div><p className="eyebrow">AGENT OPERATIONS / AUTHORIZATION WORKFLOW</p><h1>Run with control.</h1><p> The planner proposes. TrustRail validates. Humans approve when required. The controlled executor records the outcome.</p></div><div className="security-note"><span className="status-dot" /> Backend authorization enforced</div></section>
-    <form className="panel run-composer" onSubmit={startRun}><div className="panel-heading"><div><p className="eyebrow">REQUEST COMPOSER</p><h2>What should the agent investigate?</h2><p className="muted">This request becomes the immutable run context. The planner can read and propose; it cannot authorize or execute writes.</p></div><span className="state-badge">READ + PROPOSE</span></div><PlannerBudgetIndicator onViewUsage={onViewUsage} /><textarea value={requestText} onChange={(event) => setRequestText(event.target.value)} placeholder={EXAMPLE} maxLength={10000} disabled={starting} /><div className="run-form-footer"><div className="model-visibility"><span>Planner model</span><strong>trustrail-planner</strong><small>Configured routing policy</small></div><button className="primary run-button" disabled={starting || !requestText.trim()}>{starting ? 'Starting run…' : 'Start run →'}</button></div><ErrorMessage error={startError} /></form>
+    <form className="panel run-composer" onSubmit={startRun}><div className="panel-heading"><div><p className="eyebrow">REQUEST COMPOSER</p><h2>What should the agent investigate?</h2><p className="muted">This request becomes the immutable run context. The planner can read and propose; it cannot authorize or execute writes.</p></div><span className="state-badge">READ + PROPOSE</span></div><PlannerBudgetIndicator onViewUsage={onViewUsage} /><textarea ref={requestInputRef} value={requestText} onChange={(event) => setRequestText(event.target.value)} placeholder={EXAMPLE} maxLength={10000} disabled={starting} /><div className="run-form-footer"><div className="model-visibility"><span>Planner model</span><strong>trustrail-planner</strong><small>Configured routing policy</small></div><button className="primary run-button" disabled={starting || !requestText.trim()}>{starting ? 'Starting run…' : 'Start run →'}</button></div><ErrorMessage error={startError} /></form>
     {!run && <section className="empty-run panel"><span className="empty-icon">01</span><h2>No active run</h2><p className="muted">Start with a natural-language request to see the complete authorization workflow.</p></section>}
-    {run && <><section className="run-summary"><div><p className="eyebrow">RUN {run.run_id}</p><h2>{run.status === 'RUNNING' ? 'Planner is working…' : `Run ${run.status.toLowerCase()}`}</h2><p className="muted">{run.user_request}</p></div><div className="run-stat"><span>MODEL</span><b>{run.planner_model}</b></div><div className="run-stat"><span>PROPOSALS</span><b>{run.proposal_count}</b></div><div className="run-stat"><span>PENDING APPROVAL</span><b>{pendingCount}</b></div></section><div className="run-last-updated">{poll.isPolling ? 'Refreshing…' : poll.lastUpdated ? `Last updated ${poll.lastUpdated.toLocaleTimeString()}` : 'Read-only workflow projection'}</div>{decisionError && <ErrorMessage error={decisionError} />}{poll.error && <><ErrorMessage error={poll.error} /><button className="quiet" onClick={poll.refresh}>Retry read-only refresh</button></>}<Workflow stages={run.workflow?.stages || []} proposals={run.proposals} onDecision={decide} busy={busyProposal} /></>}
+    {run && <><section className="run-summary"><div><p className="eyebrow">RUN {run.run_id}</p><h2>{run.status === 'RUNNING' ? 'Planner is working…' : `Run ${run.status.toLowerCase()}`}</h2><p className="muted">{run.user_request}</p></div><div className="run-stat"><span>MODEL</span><b>{run.planner_model}</b></div><div className="run-stat"><span>PROPOSALS</span><b>{run.proposal_count}</b></div><div className="run-stat"><span>PENDING APPROVAL</span><b>{pendingCount}</b></div></section><div className="run-last-updated">{poll.isPolling ? 'Refreshing…' : poll.lastUpdated ? `Last updated ${poll.lastUpdated.toLocaleTimeString()}` : 'Read-only workflow projection'}</div>{decisionError && <ErrorMessage error={decisionError} />}{poll.error && <><ErrorMessage error={poll.error} /><button className="quiet" onClick={poll.refresh}>Retry read-only refresh</button></>}<Workflow stages={run.workflow?.stages || []} proposals={run.proposals} onDecision={decide} busy={busyProposal} onChangePrompt={changePrompt} /></>}
   </main>
 }
