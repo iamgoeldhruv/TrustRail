@@ -10,8 +10,8 @@ export const chaosApi = {
   approve(transactionId, approver = 'chaos-operator') {
     return api.post(`/api/v1/transactions/${encodeURIComponent(transactionId)}/approve`, { approver })
   },
-  retry(transactionId) {
-    return api.post(`/api/v1/transactions/${encodeURIComponent(transactionId)}/retry`, {})
+  retry(transactionId, executor = 'secure') {
+    return api.post(`/api/v1/transactions/${encodeURIComponent(transactionId)}/retry?executor=${encodeURIComponent(executor)}`, {})
   },
   reconcile(transactionId) {
     return api.post(`/api/v1/transactions/${encodeURIComponent(transactionId)}/reconcile`, {})

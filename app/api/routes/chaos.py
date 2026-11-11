@@ -115,10 +115,19 @@ async def _issue_state(issue_number: int, txn_id: str | None = None) -> dict[str
 def _observability(transaction: Any, request: Request) -> dict[str, Any]:
     events = request.app.state.ledger_store.get_events(txn_id=transaction.id)
     event_payloads = [event.model_dump(mode="json") for event in events]
-    write_attempts = sum(event.type == "WRITE_DISPATCHED" for event in events)
+    dispatches = [
+        event for event in events if event.type == "WRITE_DISPATCHED"
+    ]
+    write_attempts = len(dispatches)
     read_only_probes = sum(
         event.type == "RECONCILIATION_STARTED" for event in events
     )
+    state_path = [
+        event.payload["to_status"]
+        for event in events
+        if event.type == "TRANSACTION_STATUS_CHANGED"
+        and event.payload.get("to_status")
+    ]
     evidence_events = [
         event.payload
         for event in events
@@ -131,6 +140,13 @@ def _observability(transaction: Any, request: Request) -> dict[str, Any]:
         "events": event_payloads,
         "write_attempts": write_attempts,
         "read_only_probes": read_only_probes,
+        "execution_mode": (
+            dispatches[0].payload.get("executor")
+            if dispatches
+            else "awaiting_approval"
+        ),
+        "state_path": state_path,
+        "retry_attempts": max(0, write_attempts - 1),
         "reconciliation_evidence": evidence_events[-1] if evidence_events else None,
         "ledger_verification": {
             "valid": verification.valid,

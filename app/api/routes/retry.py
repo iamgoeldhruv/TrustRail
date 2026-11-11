@@ -1,5 +1,7 @@
 
-from fastapi import APIRouter, HTTPException, Request, status
+from typing import Literal
+
+from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from app.otari.exceptions import OtariMCPError
 from app.txn.executor import (
@@ -29,6 +31,10 @@ router = APIRouter(
 async def retry_transaction(
     transaction_id: str,
     request: Request,
+    executor_mode: Literal["secure", "naive"] = Query(
+        default="secure",
+        alias="executor",
+    ),
 ) -> Transaction:
     store: TransactionStore = request.app.state.transaction_store
     executor: TransactionExecutor | None = (
@@ -106,7 +112,7 @@ async def retry_transaction(
             )
 
         # The executor performs fresh PRECHECK and owns the write dispatch.
-        return await executor.execute(transaction_id)
+        return await executor.execute(transaction_id, executor=executor_mode)
 
     except HTTPException:
         raise
